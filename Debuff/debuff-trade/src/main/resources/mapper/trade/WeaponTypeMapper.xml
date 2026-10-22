@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.WeaponTypeMapper -->
+<!-- 功能：武器类型（WeaponType）的增删改查，如匕首、步枪、手枪等分类管理 -->
+<mapper namespace="com.debuff.trade.mapper.WeaponTypeMapper">
+
+    <!-- 结果映射：将 debuff_weapon_type 表的数据库列名映射到 WeaponType 实体属性 -->
+    <resultMap type="WeaponType" id="WeaponTypeResult">
+        <id     property="id"             column="id"             />
+        <result property="weaponName"     column="weapon_name"     />
+        <result property="weaponCategory" column="weapon_category" />
+        <result property="icon"           column="icon"           />
+        <result property="sortOrder"      column="sort_order"      />
+        <result property="createTime"     column="create_time"     />
+    </resultMap>
+
+    <!-- SQL片段：武器类型基础查询语句，可被其他SQL通过include复用 -->
+    <sql id="selectWeaponTypeVo">
+        select id, weapon_name, weapon_category, icon, sort_order, create_time
+        from debuff_weapon_type
+    </sql>
+
+    <!-- 查询武器类型列表：支持按武器名称模糊搜索、按分类精确筛选，按排序值和ID排序 -->
+    <select id="selectWeaponTypeList" parameterType="WeaponType" resultMap="WeaponTypeResult">
+        <include refid="selectWeaponTypeVo"/>
+        <where>
+            <!-- 条件筛选：按武器名称模糊匹配 -->
+            <if test="weaponName != null and weaponName != ''">
+                and weapon_name like concat('%', #{weaponName}, '%')
+            </if>
+            <!-- 条件筛选：按武器分类精确匹配 -->
+            <if test="weaponCategory != null and weaponCategory != ''">
+                and weapon_category = #{weaponCategory}
+            </if>
+        </where>
+        order by sort_order, id
+    </select>
+
+    <!-- 查询所有武器类型（无筛选条件），用于下拉选择框等场景 -->
+    <select id="selectAllWeaponTypes" resultMap="WeaponTypeResult">
+        <include refid="selectWeaponTypeVo"/>
+        order by sort_order, id
+    </select>
+
+    <!-- 根据ID查询单个武器类型详情 -->
+    <select id="selectWeaponTypeById" parameterType="Long" resultMap="WeaponTypeResult">
+        <include refid="selectWeaponTypeVo"/>
+        where id = #{id}
+    </select>
+
+    <!-- 新增武器类型：插入名称、分类、图标、排序值，自增主键回填到实体id字段 -->
+    <insert id="insertWeaponType" parameterType="WeaponType" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_weapon_type (weapon_name, weapon_category, icon, sort_order)
+        values (#{weaponName}, #{weaponCategory}, #{icon}, #{sortOrder})
+    </insert>
+
+    <!-- 修改武器类型：动态SET，只更新非空字段 -->
+    <update id="updateWeaponType" parameterType="WeaponType">
+        update debuff_weapon_type
+        <set>
+            <if test="weaponName != null and weaponName != ''">weapon_name = #{weaponName},</if>
+            <if test="weaponCategory != null and weaponCategory != ''">weapon_category = #{weaponCategory},</if>
+            <if test="icon != null">icon = #{icon},</if>
+            <if test="sortOrder != null">sort_order = #{sortOrder},</if>
+        </set>
+        where id = #{id}
+    </update>
+
+    <!-- 根据ID删除单个武器类型 -->
+    <delete id="deleteWeaponTypeById" parameterType="Long">
+        delete from debuff_weapon_type where id = #{id}
+    </delete>
+
+    <!-- 批量删除武器类型：通过foreach遍历ID数组，生成IN子句 -->
+    <delete id="deleteWeaponTypeByIds" parameterType="Long">
+        delete from debuff_weapon_type where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+</mapper>

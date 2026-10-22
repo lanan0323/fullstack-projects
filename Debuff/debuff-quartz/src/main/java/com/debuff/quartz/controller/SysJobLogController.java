@@ -1,0 +1,94 @@
+// 包声明
+package com.debuff.quartz.controller;
+
+// 导入所需类
+import java.util.List;
+import javax.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import com.debuff.common.annotation.Log;
+import com.debuff.common.core.controller.BaseController;
+import com.debuff.common.core.domain.AjaxResult;
+import com.debuff.common.core.page.TableDataInfo;
+import com.debuff.common.enums.BusinessType;
+import com.debuff.common.utils.poi.ExcelUtil;
+import com.debuff.quartz.domain.SysJobLog;
+import com.debuff.quartz.service.ISysJobLogService;
+
+/**
+ * 调度日志操作处理
+ * 
+ * @author ruoyi
+ */
+@RestController // 标记为REST控制器
+@RequestMapping("/monitor/jobLog") // 请求路径前缀
+public class SysJobLogController extends BaseController
+{
+    @Autowired // 自动注入调度日志服务
+    private ISysJobLogService jobLogService;
+
+    /**
+     * 查询定时任务调度日志列表
+     */
+    @PreAuthorize("@ss.hasPermi('monitor:job:list')") // 权限校验：调度日志列表
+    @GetMapping("/list") // GET请求
+    public TableDataInfo list(SysJobLog sysJobLog)
+    {
+        startPage(); // 设置分页参数
+        List<SysJobLog> list = jobLogService.selectJobLogList(sysJobLog); // 查询调度日志列表
+        return getDataTable(list); // 返回分页数据
+    }
+
+    /**
+     * 导出定时任务调度日志列表
+     */
+    @PreAuthorize("@ss.hasPermi('monitor:job:export')") // 权限校验：调度日志导出
+    @Log(title = "任务调度日志", businessType = BusinessType.EXPORT) // 记录操作日志
+    @PostMapping("/export") // POST导出请求
+    public void export(HttpServletResponse response, SysJobLog sysJobLog)
+    {
+        List<SysJobLog> list = jobLogService.selectJobLogList(sysJobLog); // 查询调度日志列表
+        ExcelUtil<SysJobLog> util = new ExcelUtil<SysJobLog>(SysJobLog.class); // 创建Excel工具
+        util.exportExcel(response, list, "调度日志"); // 导出Excel
+    }
+    
+    /**
+     * 根据调度编号获取详细信息
+     */
+    @PreAuthorize("@ss.hasPermi('monitor:job:query')") // 权限校验：调度日志查询
+    @GetMapping(value = "/{jobLogId}") // GET请求，路径带ID
+    public AjaxResult getInfo(@PathVariable Long jobLogId)
+    {
+        return success(jobLogService.selectJobLogById(jobLogId)); // 根据ID查询日志详情
+    }
+
+
+    /**
+     * 删除定时任务调度日志
+     */
+    @PreAuthorize("@ss.hasPermi('monitor:job:remove')") // 权限校验：调度日志删除
+    @Log(title = "定时任务调度日志", businessType = BusinessType.DELETE) // 记录操作日志
+    @DeleteMapping("/{jobLogIds}") // DELETE请求，支持批量
+    public AjaxResult remove(@PathVariable Long[] jobLogIds)
+    {
+        return toAjax(jobLogService.deleteJobLogByIds(jobLogIds)); // 批量删除日志
+    }
+
+    /**
+     * 清空定时任务调度日志
+     */
+    @PreAuthorize("@ss.hasPermi('monitor:job:remove')") // 权限校验：调度日志清空
+    @Log(title = "调度日志", businessType = BusinessType.CLEAN) // 记录操作日志
+    @DeleteMapping("/clean") // DELETE清空请求
+    public AjaxResult clean()
+    {
+        jobLogService.cleanJobLog(); // 清空所有调度日志
+        return success();
+    }
+}

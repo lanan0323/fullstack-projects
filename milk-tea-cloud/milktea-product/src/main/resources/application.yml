@@ -1,0 +1,27 @@
+server:
+  port: 8082
+spring:
+  datasource:
+    url: jdbc:mysql://192.168.120.238:3306/mt_product?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
+  cloud:
+    inetutils:
+      preferred-networks: 192.168.120
+    nacos:
+      discovery:
+        fail-fast: false
+    sentinel:
+      transport:
+        dashboard: 192.168.120.238:8858
+      eager: true
+
+# AI 点单助手配置
+ai:
+  llm:
+    # OpenAI 兼容接口（DeepSeek/通义/Kimi 等均可换）
+    base-url: https://api.deepseek.com
+    # 不要把真实 Key 提交到 GitHub：设环境变量 DEEPSEEK_API_KEY，或临时填在这里
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: deepseek-chat
+    timeout-seconds: 30
+  rag:
+    top-k: 3

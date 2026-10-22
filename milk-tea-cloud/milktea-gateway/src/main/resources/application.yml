@@ -1,0 +1,43 @@
+server:
+  port: 10010
+spring:
+  main:
+    web-application-type: reactive
+  cloud:
+    inetutils:
+      preferred-networks: 192.168.120
+    gateway:
+      routes:
+        - id: milktea-user
+          uri: lb://milktea-user
+          predicates:
+            - Path=/api/user/**,/api/employee/**,/api/role/**,/api/coupon/**
+          filters:
+            - StripPrefix=1
+        - id: milktea-product
+          uri: lb://milktea-product
+          predicates:
+            - Path=/api/product/**,/api/category/**,/api/spec/**
+          filters:
+            - StripPrefix=1
+        - id: milktea-order
+          uri: lb://milktea-order
+          predicates:
+            - Path=/api/order/**
+          filters:
+            - StripPrefix=1
+        - id: milktea-store
+          uri: lb://milktea-store
+          predicates:
+            - Path=/api/material/**,/api/statistics/**,/api/stock/**,/api/recipe/**
+          filters:
+            - StripPrefix=1
+
+cloud:
+  whitePaths:
+    - /api/user/login
+    - /api/user/register
+    - /api/product/list
+    - /api/product/**
+    - /api/category/**
+    - /api/spec/**

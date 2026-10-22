@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.quartz.mapper.SysJobLogMapper -->
+<!-- 功能：定时任务执行日志管理，记录每次任务执行的名称、分组、调用目标、执行消息、状态和异常信息，支持按条件查询和清空 -->
+<mapper namespace="com.debuff.quartz.mapper.SysJobLogMapper">
+
+	<!-- 结果映射：将 sys_job_log 表的数据库列名映射到 SysJobLog 实体属性 -->
+	<resultMap type="SysJobLog" id="SysJobLogResult">
+		<id     property="jobLogId"       column="job_log_id"      />
+		<result property="jobName"        column="job_name"        />
+		<result property="jobGroup"       column="job_group"       />
+		<result property="invokeTarget"   column="invoke_target"   />
+		<result property="jobMessage"     column="job_message"     />
+		<result property="status"         column="status"          />
+		<result property="exceptionInfo"  column="exception_info"  />
+		<result property="createTime"     column="create_time"     />
+	</resultMap>
+	
+	<!-- SQL片段：任务日志基础查询语句，查询 sys_job_log 全部字段，可被其他SQL通过include复用 -->
+	<sql id="selectJobLogVo">
+        select job_log_id, job_name, job_group, invoke_target, job_message, status, exception_info, create_time 
+		from sys_job_log
+    </sql>
+	
+	<!-- 查询任务日志列表：支持按任务名称模糊匹配、任务分组精确匹配、状态精确匹配、调用目标模糊匹配、时间范围筛选 -->
+	<select id="selectJobLogList" parameterType="SysJobLog" resultMap="SysJobLogResult">
+		<!-- 复用基础查询语句 -->
+		<include refid="selectJobLogVo"/>
+		<where>
+			<!-- 条件筛选：按任务名称模糊匹配 -->
+			<if test="jobName != null and jobName != ''">
+				AND job_name like concat('%', #{jobName}, '%')
+			</if>
+			<!-- 条件筛选：按任务分组精确匹配（系统默认/其他） -->
+			<if test="jobGroup != null and jobGroup != ''">
+				AND job_group = #{jobGroup}
+			</if>
+			<!-- 条件筛选：按执行状态精确匹配（0成功/1失败） -->
+			<if test="status != null and status != ''">
+				AND status = #{status}
+			</if>
+			<!-- 条件筛选：按调用目标模糊匹配（如 com.debuff.task.OrderTimeoutTask.run()） -->
+			<if test="invokeTarget != null and invokeTarget != ''">
+				AND invoke_target like concat('%', #{invokeTarget}, '%')
+			</if>
+			<if test="params.beginTime != null and params.beginTime != ''"><!-- 开始时间检索 -->
+				and date_format(create_time,'%y%m%d') &gt;= date_format(#{params.beginTime},'%y%m%d')
+			</if>
+			<if test="params.endTime != null and params.endTime != ''"><!-- 结束时间检索 -->
+				and date_format(create_time,'%y%m%d') &lt;= date_format(#{params.endTime},'%y%m%d')
+			</if>
+		</where>
+	</select>
+	
+	<!-- 查询全部任务日志：无筛选条件，用于调度器内部获取所有日志 -->
+	<select id="selectJobLogAll" resultMap="SysJobLogResult">
+		<!-- 复用基础查询语句 -->
+		<include refid="selectJobLogVo"/>
+	</select>
+	
+	<!-- 根据ID查询任务日志详情：按 job_log_id 精确查询单条记录 -->
+	<select id="selectJobLogById" parameterType="Long" resultMap="SysJobLogResult">
+		<!-- 复用基础查询语句 -->
+		<include refid="selectJobLogVo"/>
+		where job_log_id = #{jobLogId}
+	</select>
+	
+	<!-- 删除单条任务日志：按 job_log_id 物理删除 -->
+	<delete id="deleteJobLogById" parameterType="Long">
+ 		delete from sys_job_log where job_log_id = #{jobLogId}
+ 	</delete>
+ 	
+ 	<!-- 批量删除任务日志：按ID数组批量物理删除 -->
+ 	<delete id="deleteJobLogByIds" parameterType="Long">
+ 		delete from sys_job_log where job_log_id in
+ 		<foreach collection="array" item="jobLogId" open="(" separator="," close=")">
+ 			#{jobLogId}
+        </foreach> 
+ 	</delete>
+ 	
+ 	<!-- 清空任务日志：使用 TRUNCATE 整表清空，不可恢复 -->
+ 	<update id="cleanJobLog">
+        truncate table sys_job_log
+    </update>
+ 	
+ 	<!-- 新增任务日志：动态插入，所有字段按需插入（非空才拼），create_time 使用 sysdate() 自动取当前时间 -->
+ 	<insert id="insertJobLog" parameterType="SysJobLog">
+ 		insert into sys_job_log(
+ 			<if test="jobLogId != null and jobLogId != 0">job_log_id,</if>
+ 			<if test="jobName != null and jobName != ''">job_name,</if>
+ 			<if test="jobGroup != null and jobGroup != ''">job_group,</if>
+ 			<if test="invokeTarget != null and invokeTarget != ''">invoke_target,</if>
+ 			<if test="jobMessage != null and jobMessage != ''">job_message,</if>
+ 			<if test="status != null and status != ''">status,</if>
+ 			<if test="exceptionInfo != null and exceptionInfo != ''">exception_info,</if>
+ 			create_time
+ 		)values(
+ 			<if test="jobLogId != null and jobLogId != 0">#{jobLogId},</if>
+ 			<if test="jobName != null and jobName != ''">#{jobName},</if>
+ 			<if test="jobGroup != null and jobGroup != ''">#{jobGroup},</if>
+ 			<if test="invokeTarget != null and invokeTarget != ''">#{invokeTarget},</if>
+ 			<if test="jobMessage != null and jobMessage != ''">#{jobMessage},</if>
+ 			<if test="status != null and status != ''">#{status},</if>
+ 			<if test="exceptionInfo != null and exceptionInfo != ''">#{exceptionInfo},</if>
+ 			sysdate()
+ 		)
+	</insert>
+
+</mapper> 

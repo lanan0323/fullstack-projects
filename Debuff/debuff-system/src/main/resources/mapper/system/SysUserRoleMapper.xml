@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.system.mapper.SysUserRoleMapper -->
+<!-- 功能：用户-角色关联表（sys_user_role）的操作，管理用户与角色的对应关系 -->
+<mapper namespace="com.debuff.system.mapper.SysUserRoleMapper">
+
+	<!-- 结果映射：用户-角色关联的简单映射，只有用户ID和角色ID两个字段 -->
+	<resultMap type="SysUserRole" id="SysUserRoleResult">
+		<result property="userId"     column="user_id"      />
+		<result property="roleId"     column="role_id"      />
+	</resultMap>
+
+    <!-- 根据用户ID删除用户-角色关联：用户编辑时先清除旧角色，再重新分配新角色 -->
+	<delete id="deleteUserRoleByUserId" parameterType="Long">
+		delete from sys_user_role where user_id=#{userId}
+	</delete>
+	
+    <!-- 统计角色关联的用户数量：删除角色前校验，有用户关联的角色不允许直接删除 -->
+	<select id="countUserRoleByRoleId" resultType="Integer">
+	    select count(1) from sys_user_role where role_id=#{roleId}  
+	</select>
+	
+    <!-- 批量删除用户-角色关联：通过foreach遍历用户ID数组，删除多个用户的所有角色关联 -->
+	<delete id="deleteUserRole" parameterType="Long">
+ 		delete from sys_user_role where user_id in
+ 		<foreach collection="array" item="userId" open="(" separator="," close=")">
+ 			#{userId}
+        </foreach> 
+ 	</delete>
+	
+    <!-- 批量插入用户-角色关联：用户编辑时重新分配角色，一条INSERT语句插入多条记录 -->
+	<insert id="batchUserRole">
+		insert into sys_user_role(user_id, role_id) values
+		<foreach item="item" index="index" collection="list" separator=",">
+			(#{item.userId},#{item.roleId})
+		</foreach>
+	</insert>
+	
+    <!-- 删除指定用户-角色关联（单条）：精确匹配用户ID和角色ID，取消某个用户的某个角色 -->
+	<delete id="deleteUserRoleInfo" parameterType="SysUserRole">
+		delete from sys_user_role where user_id=#{userId} and role_id=#{roleId}
+	</delete>
+	
+    <!-- 批量删除指定角色的用户关联：从角色中移除多个用户的关联 -->
+	<delete id="deleteUserRoleInfos">
+	    delete from sys_user_role where role_id=#{roleId} and user_id in
+ 	    <foreach collection="userIds" item="userId" open="(" separator="," close=")">
+ 	        #{userId}
+            </foreach> 
+	</delete>
+</mapper>

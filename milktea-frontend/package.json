@@ -1,0 +1,14 @@
+{
+  "name": "milktea-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:admin": "npm run dev --prefix admin",
+    "dev:mall": "npm run dev --prefix mall",
+    "dev": "npm run dev:admin & npm run dev:mall",
+    "dev:all": "npx concurrently \"npm run dev:admin\" \"npm run dev:mall\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

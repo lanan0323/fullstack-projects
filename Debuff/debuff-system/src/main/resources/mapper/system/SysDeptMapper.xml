@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.system.mapper.SysDeptMapper -->
+<!-- 功能：部门（SysDept）的增删改查，支持树形结构管理（ancestors/find_in_set）、数据权限过滤、软删除 -->
+<mapper namespace="com.debuff.system.mapper.SysDeptMapper">
+
+	<!-- 结果映射：将 sys_dept 表的数据库列名映射到 SysDept 实体属性，包含父部门名称 -->
+	<resultMap type="SysDept" id="SysDeptResult">
+		<id     property="deptId"     column="dept_id"     />
+		<result property="parentId"   column="parent_id"   />
+		<result property="ancestors"  column="ancestors"   />
+		<result property="deptName"   column="dept_name"   />
+		<result property="orderNum"   column="order_num"   />
+		<result property="leader"     column="leader"      />
+		<result property="phone"      column="phone"       />
+		<result property="email"      column="email"       />
+		<result property="status"     column="status"      />
+		<result property="delFlag"    column="del_flag"    />
+		<result property="parentName" column="parent_name" />
+		<result property="createBy"   column="create_by"   />
+		<result property="createTime" column="create_time" />
+		<result property="updateBy"   column="update_by"   />
+		<result property="updateTime" column="update_time" />
+	</resultMap>
+	
+	<!-- SQL片段：部门基础查询语句，可被其他SQL通过include复用 -->
+	<sql id="selectDeptVo">
+        select d.dept_id, d.parent_id, d.ancestors, d.dept_name, d.order_num, d.leader, d.phone, d.email, d.status, d.del_flag, d.create_by, d.create_time 
+        from sys_dept d
+    </sql>
+    
+	<!-- 查询部门列表：支持按部门ID/父部门/名称/状态筛选，支持数据权限过滤，软删除过滤（del_flag='0'） -->
+	<select id="selectDeptList" parameterType="SysDept" resultMap="SysDeptResult">
+        <include refid="selectDeptVo"/>
+        where d.del_flag = '0'
+		<if test="deptId != null and deptId != 0">
+			AND dept_id = #{deptId}
+		</if>
+        <if test="parentId != null and parentId != 0">
+			AND parent_id = #{parentId}
+		</if>
+		<!-- 条件筛选：按部门名称模糊匹配 -->
+		<if test="deptName != null and deptName != ''">
+			AND dept_name like concat('%', #{deptName}, '%')
+		</if>
+		<!-- 条件筛选：按状态精确匹配 -->
+		<if test="status != null and status != ''">
+			AND status = #{status}
+		</if>
+		<!-- 数据范围过滤：由AOP切面动态注入SQL条件，控制用户只能看到权限范围内的部门 -->
+		${params.dataScope}
+		order by d.parent_id, d.order_num
+    </select>
+	
+    <!-- 查询角色已关联的部门ID列表：用于角色分配权限时回显已选部门 -->
+    <!-- deptCheckStrictly=true时排除子部门（只保留直接关联的部门，不包含子级） -->
+    <select id="selectDeptListByRoleId" resultType="Long">
+		select d.dept_id
+		from sys_dept d
+            left join sys_role_dept rd on d.dept_id = rd.dept_id
+        where rd.role_id = #{roleId}
+            <if test="deptCheckStrictly">
+              and d.dept_id not in (select d.parent_id from sys_dept d inner join sys_role_dept rd on d.dept_id = rd.dept_id and rd.role_id = #{roleId})
+            </if>
+		order by d.parent_id, d.order_num
+	</select>
+    
+    <!-- 根据ID查询部门详情：子查询获取父部门名称，用于编辑页面展示 -->
+    <select id="selectDeptById" parameterType="Long" resultMap="SysDeptResult">
+		select d.dept_id, d.parent_id, d.ancestors, d.dept_name, d.order_num, d.leader, d.phone, d.email, d.status,
+			(select dept_name from sys_dept where dept_id = d.parent_id) parent_name
+		from sys_dept d
+		where d.dept_id = #{deptId}
+	</select>
+    
+    <!-- 检查部门下是否存在用户：删除部门前校验，有用户的部门不允许删除 -->
+    <select id="checkDeptExistUser" parameterType="Long" resultType="int">
+		select count(1) from sys_user where dept_id = #{deptId} and del_flag = '0'
+	</select>
+	
+    <!-- 检查部门是否有子部门：删除部门前校验，有子部门的需要先处理子级 -->
+	<select id="hasChildByDeptId" parameterType="Long" resultType="int">
+		select count(1) from sys_dept
+		where del_flag = '0' and parent_id = #{deptId} limit 1
+	</select>
+	
+    <!-- 查询指定部门的所有子部门（递归）：使用find_in_set匹配ancestors字段中的祖先ID链 -->
+	<select id="selectChildrenDeptById" parameterType="Long" resultMap="SysDeptResult">
+		select * from sys_dept where find_in_set(#{deptId}, ancestors)
+	</select>
+	
+    <!-- 查询指定部门的正常状态子部门数量：用于判断是否需要级联修改子部门状态 -->
+	<select id="selectNormalChildrenDeptById" parameterType="Long" resultType="int">
+		select count(*) from sys_dept where status = 0 and del_flag = '0' and find_in_set(#{deptId}, ancestors)
+	</select>
+	
+    <!-- 校验部门名称在同级下是否唯一：同一父部门下不允许重名 -->
+	<select id="checkDeptNameUnique" resultMap="SysDeptResult">
+	    <include refid="selectDeptVo"/>
+		where dept_name=#{deptName} and parent_id = #{parentId} and del_flag = '0' limit 1
+	</select>
+    
+    <!-- 新增部门：动态插入非空字段，支持手动指定dept_id（用于导入）或自增 -->
+	<insert id="insertDept" parameterType="SysDept">
+ 		insert into sys_dept(
+ 			<if test="deptId != null and deptId != 0">dept_id,</if>
+ 			<if test="parentId != null and parentId != 0">parent_id,</if>
+ 			<if test="deptName != null and deptName != ''">dept_name,</if>
+ 			<if test="ancestors != null and ancestors != ''">ancestors,</if>
+ 			<if test="orderNum != null">order_num,</if>
+ 			<if test="leader != null and leader != ''">leader,</if>
+ 			<if test="phone != null and phone != ''">phone,</if>
+ 			<if test="email != null and email != ''">email,</if>
+ 			<if test="status != null">status,</if>
+ 			<if test="createBy != null and createBy != ''">create_by,</if>
+ 			create_time
+ 		)values(
+ 			<if test="deptId != null and deptId != 0">#{deptId},</if>
+ 			<if test="parentId != null and parentId != 0">#{parentId},</if>
+ 			<if test="deptName != null and deptName != ''">#{deptName},</if>
+ 			<if test="ancestors != null and ancestors != ''">#{ancestors},</if>
+ 			<if test="orderNum != null">#{orderNum},</if>
+ 			<if test="leader != null and leader != ''">#{leader},</if>
+ 			<if test="phone != null and phone != ''">#{phone},</if>
+ 			<if test="email != null and email != ''">#{email},</if>
+ 			<if test="status != null">#{status},</if>
+ 			<if test="createBy != null and createBy != ''">#{createBy},</if>
+ 			sysdate()
+ 		)
+	</insert>
+	
+    <!-- 修改部门信息：动态SET，只更新非空字段 -->
+	<update id="updateDept" parameterType="SysDept">
+ 		update sys_dept
+ 		<set>
+ 			<if test="parentId != null and parentId != 0">parent_id = #{parentId},</if>
+ 			<if test="deptName != null and deptName != ''">dept_name = #{deptName},</if>
+ 			<if test="ancestors != null and ancestors != ''">ancestors = #{ancestors},</if>
+ 			<if test="orderNum != null">order_num = #{orderNum},</if>
+ 			<if test="leader != null">leader = #{leader},</if>
+ 			<if test="phone != null">phone = #{phone},</if>
+ 			<if test="email != null">email = #{email},</if>
+ 			<if test="status != null and status != ''">status = #{status},</if>
+ 			<if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+ 			update_time = sysdate()
+ 		</set>
+ 		where dept_id = #{deptId}
+	</update>
+	
+    <!-- 批量更新子部门的ancestors祖先链：父部门变更时，级联更新所有子部门的祖先路径 -->
+    <!-- 使用CASE WHEN语法批量更新不同部门的不同ancestors值，一条SQL完成 -->
+	<update id="updateDeptChildren" parameterType="java.util.List">
+	    update sys_dept set ancestors =
+	    <foreach collection="depts" item="item" index="index"
+	        separator=" " open="case dept_id" close="end">
+	        when #{item.deptId} then #{item.ancestors}
+	    </foreach>
+	    where dept_id in
+	    <foreach collection="depts" item="item" index="index"
+	        separator="," open="(" close=")">
+	        #{item.deptId}
+	    </foreach>
+	</update>
+	 
+    <!-- 批量将部门状态设为正常：当父部门启用时，级联启用所有子部门 -->
+	<update id="updateDeptStatusNormal" parameterType="Long">
+ 	    update sys_dept set status = '0' where dept_id in 
+ 	    <foreach collection="array" item="deptId" open="(" separator="," close=")">
+        	#{deptId}
+        </foreach>
+	</update>
+	
+    <!-- 删除部门（软删除）：将del_flag设为'2'而非物理删除，保留数据完整性 -->
+	<delete id="deleteDeptById" parameterType="Long">
+		update sys_dept set del_flag = '2' where dept_id = #{deptId}
+	</delete>
+
+</mapper> 

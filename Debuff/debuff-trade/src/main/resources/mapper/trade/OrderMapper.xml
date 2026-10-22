@@ -1,0 +1,333 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.debuff.trade.mapper.OrderMapper">
+
+    <!-- 结果映射：将数据库列名映射到 Java 实体属性，用于多表 JOIN 查询结果 -->
+    <resultMap type="Order" id="OrderResult">
+        <!-- 主键映射：订单表的 id 列 → 实体的 id 属性 -->
+        <result property="id"    column="id"    />
+        <!-- 订单号映射：order_no 列 → orderNo 属性 -->
+        <result property="orderNo"    column="order_no"    />
+        <!-- 饰品ID映射：skin_id 列 → skinId 属性，关联 debuff_skin 表 -->
+        <result property="skinId"    column="skin_id"    />
+        <!-- 库存ID映射：inventory_id 列 → inventoryId 属性，关联 debuff_inventory 表 -->
+        <result property="inventoryId"    column="inventory_id"    />
+        <!-- 上架记录ID映射：listing_id 列 → listingId 属性，关联 debuff_skin_listing 表 -->
+        <result property="listingId"    column="listing_id"    />
+        <!-- 买家ID映射：buyer_id 列 → buyerId 属性，关联 sys_user 表 -->
+        <result property="buyerId"    column="buyer_id"    />
+        <!-- 卖家ID映射：seller_id 列 → sellerId 属性，关联 sys_user 表 -->
+        <result property="sellerId"    column="seller_id"    />
+        <!-- 以下3个字段是 LEFT JOIN 查出的关联名称，非 debuff_order 表本身的列 -->
+        <!-- 买家昵称映射：通过 LEFT JOIN sys_user 查出的 buyer_name → buyerName 属性 -->
+        <result property="buyerName"    column="buyer_name"    />
+        <!-- 卖家昵称映射：通过 LEFT JOIN sys_user 查出的 seller_name → sellerName 属性 -->
+        <result property="sellerName"    column="seller_name"    />
+        <!-- 饰品名称映射：通过 LEFT JOIN debuff_skin 查出的 skin_name → skinName 属性 -->
+        <result property="skinName"      column="skin_name"      />
+        <!-- 成交价格映射：price 列 → price 属性，单位：元 -->
+        <result property="price"    column="price"    />
+        <!-- 平台手续费映射：platform_fee 列 → platformFee 属性，平台抽取的费用 -->
+        <result property="platformFee"    column="platform_fee"    />
+        <!-- 卖家实收映射：seller_income 列 → sellerIncome 属性，卖家实际到手金额 -->
+        <result property="sellerIncome"    column="seller_income"    />
+        <!-- 订单状态映射：status 列 → status 属性，0=待确认 1=已完成 2=已取消 -->
+        <result property="status"    column="status"    />
+        <!-- 创建时间映射：create_time 列 → createTime 属性，订单创建时间 -->
+        <result property="createTime"    column="create_time"    />
+        <!-- 支付时间映射：pay_time 列 → payTime 属性，买家确认付款时间 -->
+        <result property="payTime"    column="pay_time"    />
+        <!-- 取消时间映射：cancel_time 列 → cancelTime 属性，订单取消时间 -->
+        <result property="cancelTime"    column="cancel_time"    />
+        <!-- 更新时间映射：update_time 列 → updateTime 属性，最后修改时间 -->
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+
+    <!--
+        共享 SQL 片段：订单基础查询（含关联名称）
+        通过 LEFT JOIN 将 buyer_id/seller_id 翻译为用户昵称，skin_id 翻译为饰品名称
+        - bu = buyer user（买家），su = seller user（卖家），s = skin（饰品）
+        使用 <include refid="selectOrderVo"/> 在需要关联名称的查询中复用此片段
+        注意：使用此片段后，WHERE 条件中的列名必须带表别名（如 o.status），
+        否则会出现 "Column 'xxx' ambiguous" 错误（多表同名列歧义）
+    -->
+    <!-- SQL片段：定义订单基础查询语句，包含多表关联查询，可被其他SQL通过include复用 -->
+    <sql id="selectOrderVo">
+        <!-- 查询订单表的所有基础字段，使用 o 作为表别名 -->
+        select o.id, o.order_no, o.skin_id, o.inventory_id, o.listing_id, o.buyer_id, o.seller_id,
+               <!-- 查询订单的金额、费用、状态和时间字段 -->
+               o.price, o.platform_fee, o.seller_income, o.status, o.create_time, o.pay_time, o.cancel_time, o.update_time,
+               <!-- 通过 LEFT JOIN 查询买家昵称，别名为 buyer_name -->
+               bu.nick_name as buyer_name,
+               <!-- 通过 LEFT JOIN 查询卖家昵称，别名为 seller_name -->
+               su.nick_name as seller_name,
+               <!-- 通过 LEFT JOIN 查询饰品名称 -->
+               s.skin_name
+        <!-- 主表：订单表，别名为 o -->
+        from debuff_order o
+        <!-- 左连接用户表获取买家昵称，关联条件：买家ID = 订单的buyer_id -->
+        left join sys_user bu on bu.user_id = o.buyer_id
+        <!-- 左连接用户表获取卖家昵称，关联条件：卖家ID = 订单的seller_id -->
+        left join sys_user su on su.user_id = o.seller_id
+        <!-- 左连接饰品表获取饰品名称，关联条件：饰品ID = 订单的skin_id -->
+        left join debuff_skin s on s.id = o.skin_id
+    </sql>
+
+    <!--
+        管理端订单列表查询（支持多条件动态筛选）
+        使用 <include> 引用共享 SQL 片段，通过 <where> + <if> 动态拼接 WHERE 条件
+        搜索条件包括：订单号、饰品名称、买家昵称、价格、手续费、实收、状态
+        注意：所有 WHERE 条件都使用了表别名（o./s./bu.），因为 selectOrderVo 是多表 JOIN
+    -->
+    <!-- 查询订单列表：支持多条件动态筛选，返回结果使用 OrderResult 映射 -->
+    <select id="selectOrderList" parameterType="Order" resultMap="OrderResult">
+        <!-- 引用共享SQL片段，包含多表关联查询的基础SELECT语句 -->
+        <include refid="selectOrderVo"/>
+        <!-- 动态WHERE子句：自动处理AND前缀，只拼接非空条件 -->
+        <where>  
+            <!-- 条件筛选：按订单号精确匹配 -->
+            <if test="orderNo != null  and orderNo != ''"> and order_no = #{orderNo}</if>
+            <!-- 条件筛选：按饰品ID精确匹配 -->
+            <if test="skinId != null "> and skin_id = #{skinId}</if>
+            <!-- 饰品名称模糊搜索，用 s.skin_name 而非 skin_name，因为是多表 JOIN -->
+            <!-- 条件筛选：按饰品名称模糊匹配，使用LIKE和concat拼接通配符 -->
+            <if test="skinName != null and skinName != ''"> and s.skin_name like concat('%',#{skinName},'%')</if>
+            <!-- 条件筛选：按买家ID精确匹配 -->
+            <if test="buyerId != null "> and buyer_id = #{buyerId}</if>
+            <!-- 买家名称同时匹配 user_name 和 nick_name，提升搜索命中率 -->
+            <!-- 条件筛选：按买家名称模糊匹配，同时搜索用户名和昵称，OR连接 -->
+            <if test="buyerName != null and buyerName != ''"> and (bu.user_name like concat('%',#{buyerName},'%') or bu.nick_name like concat('%',#{buyerName},'%'))</if>
+            <!-- 条件筛选：按卖家ID精确匹配 -->
+            <if test="sellerId != null "> and seller_id = #{sellerId}</if>
+            <!-- 条件筛选：按成交价格精确匹配 -->
+            <if test="price != null "> and price = #{price}</if>
+            <!-- 条件筛选：按平台手续费精确匹配 -->
+            <if test="platformFee != null "> and platform_fee = #{platformFee}</if>
+            <!-- 条件筛选：按卖家实收金额精确匹配 -->
+            <if test="sellerIncome != null "> and seller_income = #{sellerIncome}</if>
+            <!-- 条件筛选：按订单状态精确匹配，0=待确认 1=已完成 2=已取消 -->
+            <if test="status != null "> and status = #{status}</if>
+        </where>
+    </select>
+    
+    <!-- 根据ID查询单条订单详情（管理端查看订单详情） -->
+    <!-- 查询单个订单详情：根据订单ID查询，返回完整的订单信息含关联名称 -->
+    <select id="selectOrderById" parameterType="Long" resultMap="OrderResult">
+        <!-- 引用共享SQL片段，包含多表关联查询的基础SELECT语句 -->
+        <include refid="selectOrderVo"/>
+        <!-- WHERE条件：按订单ID精确匹配，使用 #{id} 防止SQL注入 -->
+        where o.id = #{id}
+    </select>
+        
+    <!--
+        新增订单（下单时调用）
+        使用 <trim> 动态拼接列名和值，只插入非空字段
+        useGeneratedKeys="true" keyProperty="id" 表示插入后自动回填自增主键到 Order.id
+        这样 Service 层 insertOrder 后可以直接拿到生成的订单ID
+    -->
+    <!-- 插入新订单：动态插入非空字段，插入后自动回填自增主键到Order.id -->
+    <insert id="insertOrder" parameterType="Order" useGeneratedKeys="true" keyProperty="id">
+        <!-- 插入目标表：debuff_order 订单表 -->
+        insert into debuff_order
+        <!-- 动态拼接列名部分：trim自动处理括号和末尾逗号 -->
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <!-- 条件插入：订单号非空时插入 order_no 列 -->
+            <if test="orderNo != null and orderNo != ''">order_no,</if>
+            <!-- 条件插入：饰品ID非空时插入 skin_id 列 -->
+            <if test="skinId != null">skin_id,</if>
+            <!-- 条件插入：库存ID非空时插入 inventory_id 列 -->
+            <if test="inventoryId != null">inventory_id,</if>
+            <!-- 条件插入：上架记录ID非空时插入 listing_id 列 -->
+            <if test="listingId != null">listing_id,</if>
+            <!-- 条件插入：买家ID非空时插入 buyer_id 列 -->
+            <if test="buyerId != null">buyer_id,</if>
+            <!-- 条件插入：卖家ID非空时插入 seller_id 列 -->
+            <if test="sellerId != null">seller_id,</if>
+            <!-- 条件插入：成交价格非空时插入 price 列 -->
+            <if test="price != null">price,</if>
+            <!-- 条件插入：平台手续费非空时插入 platform_fee 列 -->
+            <if test="platformFee != null">platform_fee,</if>
+            <!-- 条件插入：卖家实收非空时插入 seller_income 列 -->
+            <if test="sellerIncome != null">seller_income,</if>
+            <!-- 条件插入：订单状态非空时插入 status 列 -->
+            <if test="status != null">status,</if>
+            <!-- 条件插入：创建时间非空时插入 create_time 列 -->
+            <if test="createTime != null">create_time,</if>
+            <!-- 条件插入：支付时间非空时插入 pay_time 列 -->
+            <if test="payTime != null">pay_time,</if>
+            <!-- 条件插入：取消时间非空时插入 cancel_time 列 -->
+            <if test="cancelTime != null">cancel_time,</if>
+            <!-- 条件插入：更新时间非空时插入 update_time 列 -->
+            <if test="updateTime != null">update_time,</if>
+         </trim>
+        <!-- 动态拼接值部分：与列名一一对应，使用 #{ } 预编译参数 -->
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <!-- 条件插入：订单号非空时插入对应的值 #{orderNo} -->
+            <if test="orderNo != null and orderNo != ''">#{orderNo},</if>
+            <!-- 条件插入：饰品ID非空时插入对应的值 #{skinId} -->
+            <if test="skinId != null">#{skinId},</if>
+            <!-- 条件插入：库存ID非空时插入对应的值 #{inventoryId} -->
+            <if test="inventoryId != null">#{inventoryId},</if>
+            <!-- 条件插入：上架记录ID非空时插入对应的值 #{listingId} -->
+            <if test="listingId != null">#{listingId},</if>
+            <!-- 条件插入：买家ID非空时插入对应的值 #{buyerId} -->
+            <if test="buyerId != null">#{buyerId},</if>
+            <!-- 条件插入：卖家ID非空时插入对应的值 #{sellerId} -->
+            <if test="sellerId != null">#{sellerId},</if>
+            <!-- 条件插入：成交价格非空时插入对应的值 #{price} -->
+            <if test="price != null">#{price},</if>
+            <!-- 条件插入：平台手续费非空时插入对应的值 #{platformFee} -->
+            <if test="platformFee != null">#{platformFee},</if>
+            <!-- 条件插入：卖家实收非空时插入对应的值 #{sellerIncome} -->
+            <if test="sellerIncome != null">#{sellerIncome},</if>
+            <!-- 条件插入：订单状态非空时插入对应的值 #{status} -->
+            <if test="status != null">#{status},</if>
+            <!-- 条件插入：创建时间非空时插入对应的值 #{createTime} -->
+            <if test="createTime != null">#{createTime},</if>
+            <!-- 条件插入：支付时间非空时插入对应的值 #{payTime} -->
+            <if test="payTime != null">#{payTime},</if>
+            <!-- 条件插入：取消时间非空时插入对应的值 #{cancelTime} -->
+            <if test="cancelTime != null">#{cancelTime},</if>
+            <!-- 条件插入：更新时间非空时插入对应的值 #{updateTime} -->
+            <if test="updateTime != null">#{updateTime},</if>
+         </trim>
+    </insert>
+
+    <!-- 更新订单信息（确认收货时记录 payTime、取消时记录 cancelTime 等） -->
+    <!-- 更新订单信息：动态更新非空字段，根据订单ID定位要更新的记录 -->
+    <update id="updateOrder" parameterType="Order">
+        <!-- 更新目标表：debuff_order 订单表 -->
+        update debuff_order
+        <!-- 动态拼接SET子句：trim自动处理SET前缀和末尾逗号 -->
+        <trim prefix="SET" suffixOverrides=",">
+            <!-- 条件更新：订单号非空时更新 order_no 字段 -->
+            <if test="orderNo != null and orderNo != ''">order_no = #{orderNo},</if>
+            <!-- 条件更新：饰品ID非空时更新 skin_id 字段 -->
+            <if test="skinId != null">skin_id = #{skinId},</if>
+            <!-- 条件更新：库存ID非空时更新 inventory_id 字段 -->
+            <if test="inventoryId != null">inventory_id = #{inventoryId},</if>
+            <!-- 条件更新：上架记录ID非空时更新 listing_id 字段 -->
+            <if test="listingId != null">listing_id = #{listingId},</if>
+            <!-- 条件更新：买家ID非空时更新 buyer_id 字段 -->
+            <if test="buyerId != null">buyer_id = #{buyerId},</if>
+            <!-- 条件更新：卖家ID非空时更新 seller_id 字段 -->
+            <if test="sellerId != null">seller_id = #{sellerId},</if>
+            <!-- 条件更新：成交价格非空时更新 price 字段 -->
+            <if test="price != null">price = #{price},</if>
+            <!-- 条件更新：平台手续费非空时更新 platform_fee 字段 -->
+            <if test="platformFee != null">platform_fee = #{platformFee},</if>
+            <!-- 条件更新：卖家实收非空时更新 seller_income 字段 -->
+            <if test="sellerIncome != null">seller_income = #{sellerIncome},</if>
+            <!-- 条件更新：订单状态非空时更新 status 字段 -->
+            <if test="status != null">status = #{status},</if>
+            <!-- 条件更新：创建时间非空时更新 create_time 字段 -->
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <!-- 条件更新：支付时间非空时更新 pay_time 字段 -->
+            <if test="payTime != null">pay_time = #{payTime},</if>
+            <!-- 条件更新：取消时间非空时更新 cancel_time 字段 -->
+            <if test="cancelTime != null">cancel_time = #{cancelTime},</if>
+            <!-- 条件更新：更新时间非空时更新 update_time 字段 -->
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        <!-- WHERE条件：按订单ID精确匹配，确定要更新的记录 -->
+        where id = #{id}
+    </update>
+
+    <!-- 删除单条订单（管理端删除） -->
+    <!-- 删除单个订单：根据订单ID删除，物理删除不可恢复 -->
+    <delete id="deleteOrderById" parameterType="Long">
+        <!-- 删除语句：从订单表中删除指定ID的记录 -->
+        delete from debuff_order where id = #{id}
+    </delete>
+
+    <!--
+        批量删除订单（管理端勾选多条删除）
+        使用 <foreach> 遍历 ID 数组，生成 WHERE id IN (1,2,3) 语法
+    -->
+    <!-- 批量删除订单：根据ID数组批量删除，使用foreach生成IN子句 -->
+    <delete id="deleteOrderByIds" parameterType="String">
+        <!-- 删除语句：从订单表中删除ID在指定列表中的记录 -->
+        delete from debuff_order where id in 
+        <!-- 遍历ID数组：生成 (id1, id2, id3) 格式的IN子句 -->
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            <!-- 每个ID值：使用 #{id} 预编译参数防止SQL注入 -->
+            #{id}
+        </foreach>
+    </delete>
+
+    <!--
+        条件更新订单状态（核心！用于并发安全的状态流转）
+        原理：WHERE id=#{id} AND status=#{fromStatus}
+        只有当前状态等于 fromStatus 时才会更新成功，返回受影响行数
+        - 返回1：更新成功，说明状态流转正常
+        - 返回0：更新失败，说明状态已被其他线程改变（并发冲突），Service 层据此抛异常回滚
+        这是"乐观锁"的简化实现：不加锁，通过条件判断来检测冲突
+    -->
+    <!-- 条件更新订单状态：乐观锁实现，只有当前状态匹配时才更新，防止并发冲突 -->
+    <update id="updateStatus">
+        <!-- 更新目标表：debuff_order 订单表 -->
+        update debuff_order
+        <!-- SET子句：设置新状态，并更新修改时间为当前系统时间 -->
+        set status = #{toStatus}, update_time = sysdate()
+        <!-- WHERE条件：按订单ID和原状态双重匹配，确保只有状态正确时才更新 -->
+        where id = #{id} and status = #{fromStatus}
+    </update>
+
+    <!--
+        C端"我的订单"查询
+        通过 userId 匹配 buyer_id 或 seller_id 实现"我买的+我卖的"
+        direction 参数控制方向：null=全部，1=只看我买的，2=只看我卖的
+        结果按 create_time desc 倒序（最新的在前面）
+        注意：这里没有用 selectOrderVo 共享片段，因为不需要 skin_name，
+        且需要同时匹配 buyer_id 和 seller_id 的 OR 条件
+    -->
+    <!-- 查询我的订单：C端用户查询自己买或卖的订单，支持按状态和方向筛选 -->
+    <select id="selectMyOrders" resultMap="OrderResult">
+        <!-- 查询订单表的基础字段，使用 o 作为表别名 -->
+        select o.id, o.order_no, o.skin_id, o.inventory_id, o.listing_id, o.buyer_id, o.seller_id,
+               <!-- 查询订单的金额、费用、状态和时间字段 -->
+               o.price, o.platform_fee, o.seller_income, o.status, o.create_time, o.pay_time, o.cancel_time, o.update_time,
+               <!-- 通过LEFT JOIN查询买家昵称，别名为 buyer_name -->
+               b.nick_name as buyer_name,
+               <!-- 通过LEFT JOIN查询卖家昵称，别名为 seller_name -->
+               s.nick_name as seller_name
+        <!-- 主表：订单表，别名为 o -->
+        from debuff_order o
+        <!-- 左连接用户表获取买家昵称，关联条件：买家ID = 订单的buyer_id -->
+        left join sys_user b on b.user_id = o.buyer_id
+        <!-- 左连接用户表获取卖家昵称，关联条件：卖家ID = 订单的seller_id -->
+        left join sys_user s on s.user_id = o.seller_id
+        <!-- WHERE条件：匹配当前用户买或卖的订单，OR连接两个条件 -->
+        where (o.buyer_id = #{userId} or o.seller_id = #{userId})
+        <!-- 条件筛选：按订单状态精确匹配，非空时才添加此条件 -->
+        <if test="status != null"> and o.status = #{status}</if>
+        <!-- direction=1 只看我买的（buyer_id 是当前用户） -->
+        <!-- 条件筛选：direction=1时，只查询当前用户作为买家的订单 -->
+        <if test="direction != null and direction == 1"> and o.buyer_id = #{userId}</if>
+        <!-- direction=2 只看我卖的（seller_id 是当前用户） -->
+        <!-- 条件筛选：direction=2时，只查询当前用户作为卖家的订单 -->
+        <if test="direction != null and direction == 2"> and o.seller_id = #{userId}</if>
+        <!-- 排序：按创建时间倒序，最新的订单排在前面 -->
+        order by o.create_time desc
+    </select>
+
+    <!--
+        查询超时未确认的订单（供定时任务 OrderTimeoutTask 调用）
+        筛选条件：status=0（待确认）且 create_time 早于"当前时间 - timeoutMinutes 分钟"
+        按 create_time asc 正序排列（最旧的先处理），保证公平性
+        定时任务拿到列表后逐个调用 cancelOrder 进行取消
+    -->
+    <!-- 查询超时订单：筛选待确认且创建时间超过指定分钟数的订单，供定时任务处理 -->
+    <select id="selectTimeoutOrders" resultMap="OrderResult">
+        <!-- 引用共享SQL片段，包含多表关联查询的基础SELECT语句 -->
+        <include refid="selectOrderVo"/>
+        <!-- WHERE条件：订单状态为0（待确认） -->
+        where o.status = 0
+        <!-- WHERE条件：创建时间早于"当前时间减去timeoutMinutes分钟"，筛选超时订单 -->
+        and o.create_time &lt; date_sub(now(), interval #{timeoutMinutes} minute)
+        <!-- 排序：按创建时间正序，最旧的订单优先处理，保证公平性 -->
+        order by o.create_time asc
+    </select>
+</mapper>

@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.WalletLogMapper -->
+<!-- 功能：钱包流水（WalletLog）的增删改查，记录每笔资金变动的明细（充值/提现/支付/收入等） -->
+<mapper namespace="com.debuff.trade.mapper.WalletLogMapper">
+    
+    <!-- 结果映射：将钱包流水表+用户表的列映射到 WalletLog 实体属性，包含关联的用户名/昵称 -->
+    <resultMap type="WalletLog" id="WalletLogResult">
+        <result property="id"    column="id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="walletId"    column="wallet_id"    />
+        <result property="type"    column="type"    />
+        <result property="amount"    column="amount"    />
+        <result property="balanceBefore"    column="balance_before"    />
+        <result property="balanceAfter"    column="balance_after"    />
+        <result property="relatedOrderNo"    column="related_order_no"    />
+        <result property="remark"    column="remark"    />
+        <result property="createTime"    column="create_time"    />
+        <!-- 关联字段：通过LEFT JOIN sys_user获取的用户名 -->
+        <result property="userName"      column="user_name"      />
+        <!-- 关联字段：通过LEFT JOIN sys_user获取的用户昵称 -->
+        <result property="nickName"      column="nick_name"      />
+    </resultMap>
+
+    <!-- SQL片段：钱包流水基础查询语句，LEFT JOIN sys_user获取用户名和昵称，便于管理端按用户名搜索 -->
+    <sql id="selectWalletLogVo">
+        select wl.id, wl.user_id, wl.wallet_id, wl.type, wl.amount, wl.balance_before, wl.balance_after, wl.related_order_no, wl.remark, wl.create_time,
+               u.user_name, u.nick_name
+        from debuff_wallet_log wl
+        left join sys_user u on u.user_id = wl.user_id
+    </sql>
+
+    <!-- 查询钱包流水列表（管理端）：支持按用户ID/用户名/钱包ID/类型/金额/关联订单号等多条件筛选 -->
+    <select id="selectWalletLogList" parameterType="WalletLog" resultMap="WalletLogResult">
+        <include refid="selectWalletLogVo"/>
+        <where>  
+            <!-- 条件筛选：按用户ID精确匹配 -->
+            <if test="userId != null "> and wl.user_id = #{userId}</if>
+            <!-- 条件筛选：按用户名模糊匹配（同时匹配登录名和昵称） -->
+            <if test="userName != null and userName != ''"> and (u.user_name like concat('%',#{userName},'%') or u.nick_name like concat('%',#{userName},'%'))</if>
+            <!-- 条件筛选：按钱包ID精确匹配 -->
+            <if test="walletId != null "> and wl.wallet_id = #{walletId}</if>
+            <!-- 条件筛选：按流水类型精确匹配（如充值/提现/支付/收入） -->
+            <if test="type != null "> and wl.type = #{type}</if>
+            <!-- 条件筛选：按变动金额精确匹配 -->
+            <if test="amount != null "> and wl.amount = #{amount}</if>
+            <!-- 条件筛选：按变动前余额精确匹配 -->
+            <if test="balanceBefore != null "> and wl.balance_before = #{balanceBefore}</if>
+            <!-- 条件筛选：按变动后余额精确匹配 -->
+            <if test="balanceAfter != null "> and wl.balance_after = #{balanceAfter}</if>
+            <!-- 条件筛选：按关联订单号精确匹配 -->
+            <if test="relatedOrderNo != null  and relatedOrderNo != ''"> and wl.related_order_no = #{relatedOrderNo}</if>
+            <!-- 条件筛选：按创建时间精确匹配 -->
+            <if test="createTime != null "> and wl.create_time = #{createTime}</if>
+        </where>
+        order by id asc
+    </select>
+    
+    <!-- 根据ID查询单条钱包流水详情 -->
+    <select id="selectWalletLogById" parameterType="Long" resultMap="WalletLogResult">
+        <include refid="selectWalletLogVo"/>
+        where id = #{id}
+    </select>
+
+    <!-- 查询当前用户的钱包流水（C端）：按创建时间倒序排列，最近的流水排在前面 -->
+    <select id="selectMyWalletLogs" parameterType="Long" resultMap="WalletLogResult">
+        <include refid="selectWalletLogVo"/>
+        where wl.user_id = #{userId}
+        order by create_time desc, id desc
+    </select>
+        
+    <!-- 新增钱包流水记录：动态插入非空字段，记录资金变动的完整快照（变动前后余额、关联订单号等） -->
+    <insert id="insertWalletLog" parameterType="WalletLog" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_wallet_log
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="userId != null">user_id,</if>
+            <if test="walletId != null">wallet_id,</if>
+            <if test="type != null">type,</if>
+            <if test="amount != null">amount,</if>
+            <if test="balanceBefore != null">balance_before,</if>
+            <if test="balanceAfter != null">balance_after,</if>
+            <if test="relatedOrderNo != null and relatedOrderNo != ''">related_order_no,</if>
+            <if test="remark != null and remark != ''">remark,</if>
+            <if test="createTime != null">create_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="userId != null">#{userId},</if>
+            <if test="walletId != null">#{walletId},</if>
+            <if test="type != null">#{type},</if>
+            <if test="amount != null">#{amount},</if>
+            <if test="balanceBefore != null">#{balanceBefore},</if>
+            <if test="balanceAfter != null">#{balanceAfter},</if>
+            <if test="relatedOrderNo != null and relatedOrderNo != ''">#{relatedOrderNo},</if>
+            <if test="remark != null and remark != ''">#{remark},</if>
+            <if test="createTime != null">#{createTime},</if>
+         </trim>
+    </insert>
+
+    <!-- 修改钱包流水：动态SET，只更新非空字段 -->
+    <update id="updateWalletLog" parameterType="WalletLog">
+        update debuff_wallet_log
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="walletId != null">wallet_id = #{walletId},</if>
+            <if test="type != null">type = #{type},</if>
+            <if test="amount != null">amount = #{amount},</if>
+            <if test="balanceBefore != null">balance_before = #{balanceBefore},</if>
+            <if test="balanceAfter != null">balance_after = #{balanceAfter},</if>
+            <if test="relatedOrderNo != null and relatedOrderNo != ''">related_order_no = #{relatedOrderNo},</if>
+            <if test="remark != null and remark != ''">remark = #{remark},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <!-- 根据ID删除单条钱包流水 -->
+    <delete id="deleteWalletLogById" parameterType="Long">
+        delete from debuff_wallet_log where id = #{id}
+    </delete>
+
+    <!-- 批量删除钱包流水：通过foreach遍历ID数组，生成IN子句 -->
+    <delete id="deleteWalletLogByIds" parameterType="String">
+        delete from debuff_wallet_log where id in 
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+</mapper>

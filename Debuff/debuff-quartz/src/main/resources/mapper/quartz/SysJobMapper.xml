@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.quartz.mapper.SysJobMapper -->
+<!-- 功能：定时任务管理，维护 sys_job 表中的定时任务配置（名称、Cron表达式、调用目标、并发策略、状态等），支持增删改查 -->
+<mapper namespace="com.debuff.quartz.mapper.SysJobMapper">
+
+	<!-- 结果映射：将 sys_job 表的数据库列名映射到 SysJob 实体属性 -->
+	<resultMap type="SysJob" id="SysJobResult">
+		<id     property="jobId"          column="job_id"          />
+		<result property="jobName"        column="job_name"        />
+		<result property="jobGroup"       column="job_group"       />
+		<result property="invokeTarget"   column="invoke_target"   />
+		<result property="cronExpression" column="cron_expression" />
+		<result property="misfirePolicy"  column="misfire_policy"  />
+		<result property="concurrent"     column="concurrent"      />
+		<result property="status"         column="status"          />
+		<result property="createBy"       column="create_by"       />
+		<result property="createTime"     column="create_time"     />
+		<result property="updateBy"       column="update_by"       />
+		<result property="updateTime"     column="update_time"     />
+		<result property="remark"         column="remark"          />
+	</resultMap>
+	
+	<!-- SQL片段：定时任务基础查询语句，查询 sys_job 全部字段，可被其他SQL通过include复用 -->
+	<sql id="selectJobVo">
+        select job_id, job_name, job_group, invoke_target, cron_expression, misfire_policy, concurrent, status, create_by, create_time, remark 
+		from sys_job
+    </sql>
+	
+	<!-- 查询定时任务列表：支持按任务名称模糊匹配、任务分组精确匹配、状态精确匹配、调用目标模糊匹配 -->
+	<select id="selectJobList" parameterType="SysJob" resultMap="SysJobResult">
+		<!-- 复用基础查询语句 -->
+		<include refid="selectJobVo"/>
+		<where>
+			<!-- 条件筛选：按任务名称模糊匹配 -->
+			<if test="jobName != null and jobName != ''">
+				AND job_name like concat('%', #{jobName}, '%')
+			</if>
+			<!-- 条件筛选：按任务分组精确匹配（系统默认/其他） -->
+			<if test="jobGroup != null and jobGroup != ''">
+				AND job_group = #{jobGroup}
+			</if>
+			<!-- 条件筛选：按状态精确匹配（0正常/1暂停） -->
+			<if test="status != null and status != ''">
+				AND status = #{status}
+			</if>
+			<!-- 条件筛选：按调用目标模糊匹配（如 com.debuff.task.OrderTimeoutTask.run()） -->
+			<if test="invokeTarget != null and invokeTarget != ''">
+				AND invoke_target like concat('%', #{invokeTarget}, '%')
+			</if>
+		</where>
+	</select>
+	
+	<!-- 查询全部定时任务：无筛选条件，用于调度器初始化时加载所有任务配置 -->
+	<select id="selectJobAll" resultMap="SysJobResult">
+		<!-- 复用基础查询语句 -->
+		<include refid="selectJobVo"/>
+	</select>
+	
+	<!-- 根据ID查询定时任务详情：按 job_id 精确查询单条记录 -->
+	<select id="selectJobById" parameterType="Long" resultMap="SysJobResult">
+		<!-- 复用基础查询语句 -->
+		<include refid="selectJobVo"/>
+		where job_id = #{jobId}
+	</select>
+	
+	<!-- 删除单个定时任务：按 job_id 物理删除 -->
+	<delete id="deleteJobById" parameterType="Long">
+ 		delete from sys_job where job_id = #{jobId}
+ 	</delete>
+ 	
+ 	<!-- 批量删除定时任务：按ID数组批量物理删除 -->
+ 	<delete id="deleteJobByIds" parameterType="Long">
+ 		delete from sys_job where job_id in
+ 		<foreach collection="array" item="jobId" open="(" separator="," close=")">
+ 			#{jobId}
+        </foreach> 
+ 	</delete>
+ 	
+ 	<!-- 修改定时任务：动态更新，使用 set 标签按需更新非空字段，update_time 自动更新为当前时间 -->
+ 	<update id="updateJob" parameterType="SysJob">
+ 		update sys_job
+ 		<set>
+ 			<if test="jobName != null and jobName != ''">job_name = #{jobName},</if>
+ 			<if test="jobGroup != null and jobGroup != ''">job_group = #{jobGroup},</if>
+ 			<if test="invokeTarget != null and invokeTarget != ''">invoke_target = #{invokeTarget},</if>
+ 			<if test="cronExpression != null and cronExpression != ''">cron_expression = #{cronExpression},</if>
+ 			<if test="misfirePolicy != null and misfirePolicy != ''">misfire_policy = #{misfirePolicy},</if>
+ 			<if test="concurrent != null and concurrent != ''">concurrent = #{concurrent},</if>
+ 			<if test="status !=null">status = #{status},</if>
+ 			<if test="remark != null and remark != ''">remark = #{remark},</if>
+ 			<if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+ 			update_time = sysdate()
+ 		</set>
+ 		where job_id = #{jobId}
+	</update>
+ 	
+ 	<!-- 新增定时任务：动态插入，所有字段按需插入（非空才拼），create_time 使用 sysdate() 自动取当前时间，useGeneratedKeys 返回自增主键 -->
+ 	<insert id="insertJob" parameterType="SysJob" useGeneratedKeys="true" keyProperty="jobId">
+ 		insert into sys_job(
+ 			<if test="jobId != null and jobId != 0">job_id,</if>
+ 			<if test="jobName != null and jobName != ''">job_name,</if>
+ 			<if test="jobGroup != null and jobGroup != ''">job_group,</if>
+ 			<if test="invokeTarget != null and invokeTarget != ''">invoke_target,</if>
+ 			<if test="cronExpression != null and cronExpression != ''">cron_expression,</if>
+ 			<if test="misfirePolicy != null and misfirePolicy != ''">misfire_policy,</if>
+ 			<if test="concurrent != null and concurrent != ''">concurrent,</if>
+ 			<if test="status != null and status != ''">status,</if>
+ 			<if test="remark != null and remark != ''">remark,</if>
+ 			<if test="createBy != null and createBy != ''">create_by,</if>
+ 			create_time
+ 		)values(
+ 			<if test="jobId != null and jobId != 0">#{jobId},</if>
+ 			<if test="jobName != null and jobName != ''">#{jobName},</if>
+ 			<if test="jobGroup != null and jobGroup != ''">#{jobGroup},</if>
+ 			<if test="invokeTarget != null and invokeTarget != ''">#{invokeTarget},</if>
+ 			<if test="cronExpression != null and cronExpression != ''">#{cronExpression},</if>
+ 			<if test="misfirePolicy != null and misfirePolicy != ''">#{misfirePolicy},</if>
+ 			<if test="concurrent != null and concurrent != ''">#{concurrent},</if>
+ 			<if test="status != null and status != ''">#{status},</if>
+ 			<if test="remark != null and remark != ''">#{remark},</if>
+ 			<if test="createBy != null and createBy != ''">#{createBy},</if>
+ 			sysdate()
+ 		)
+	</insert>
+
+</mapper> 

@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: milktea-store
+  cloud:
+    nacos:
+      server-addr: 192.168.120.238:8848
+      config:
+        file-extension: yml
+        shared-configs:
+          - dataId: shared-jdbc.yml
+          - dataId: shared-log.yml

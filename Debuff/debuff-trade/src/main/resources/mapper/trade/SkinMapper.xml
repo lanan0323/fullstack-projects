@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.SkinMapper -->
+<!-- 功能：饰品（Skin）的增删改查，包含管理端饰品管理、C端市场列表、饰品详情（卖家报价/价格走势）、热门饰品等 -->
+<mapper namespace="com.debuff.trade.mapper.SkinMapper">
+
+    <!-- 结果映射（基础）：将饰品表+武器类型+品质的列映射到 Skin 实体，包含关联的武器名/品质名/磨损名 -->
+    <resultMap type="Skin" id="SkinResult">
+        <id     property="id"           column="id"            />
+        <result property="skinName"     column="skin_name"     />
+        <result property="weaponTypeId" column="weapon_type_id"/>
+        <result property="qualityId"    column="quality_id"    />
+        <result property="imageUrl"     column="image_url"     />
+        <result property="description"  column="description"   />
+        <result property="minPrice"     column="min_price"     />
+        <result property="status"       column="status"        />
+        <result property="weaponName"   column="weapon_name"   />
+        <result property="weaponCategory" column="weapon_category" />
+        <result property="qualityName"  column="quality_name"  />
+        <!-- 磨损名称通过子查询从库存表获取，非饰品表自身字段 -->
+        <result property="wearName"     column="wear_name"     />
+        <result property="createTime"   column="create_time"   />
+        <result property="updateTime"   column="update_time"   />
+    </resultMap>
+
+    <!-- 结果映射（市场VO）：C端市场列表展示视图，包含最低价/在售数量/品质颜色等聚合信息 -->
+    <resultMap type="SkinMarketVO" id="SkinMarketVOResult">
+        <id     property="skinId"       column="skin_id"        />
+        <result property="skinName"     column="skin_name"      />
+        <result property="imageUrl"     column="image_url"      />
+        <result property="minPrice"     column="min_price"      />
+        <result property="weaponName"   column="weapon_name"    />
+        <result property="weaponCategory" column="weapon_category" />
+        <result property="qualityName"  column="quality_name"   />
+        <result property="qualityColor" column="quality_color"  />
+        <!-- 聚合字段：当前最低在售价格 -->
+        <result property="lowestPrice"  column="lowest_price"   />
+        <!-- 聚合字段：在售上架数量 -->
+        <result property="listingCount" column="listing_count"  />
+        <result property="wearName"     column="wear_name"      />
+        <!-- 关联字段：最低价的上架记录ID，用于点击跳转到具体商品 -->
+        <result property="firstListingId" column="first_listing_id" />
+    </resultMap>
+
+    <!-- 结果映射（饰品详情的卖家报价项）：饰品详情页中每个卖家的报价信息 -->
+    <resultMap type="com.debuff.trade.domain.vo.SkinDetailVO$ListingItem" id="ListingItemResult">
+        <id     property="id"           column="id"            />
+        <result property="inventoryId"  column="inventory_id"  />
+        <result property="sellerId"     column="seller_id"     />
+        <result property="sellerName"   column="seller_name"   />
+        <result property="price"        column="price"         />
+        <result property="listingTime"  column="listing_time"  />
+    </resultMap>
+
+    <!-- 结果映射（价格走势图数据点）：饰品详情页的价格走势，按天聚合的统计数据 -->
+    <resultMap type="com.debuff.trade.domain.vo.SkinDetailVO$PricePoint" id="PricePointResult">
+        <result property="recordDate" column="record_date" />
+        <result property="avgPrice"  column="avg_price"    />
+        <result property="minPrice"  column="min_price"    />
+        <result property="maxPrice"  column="max_price"    />
+        <result property="volume"    column="volume"       />
+    </resultMap>
+
+    <!-- SQL片段：饰品基础查询语句，LEFT JOIN武器类型和品质表，子查询获取磨损名称 -->
+    <sql id="selectSkinVo">
+        select s.id, s.skin_name, s.weapon_type_id, s.quality_id, s.image_url, s.description,
+               s.min_price, s.status, s.create_time, s.update_time,
+               wt.weapon_name, wt.weapon_category, sq.quality_name,
+               (select wear_name from debuff_inventory i where i.skin_id = s.id limit 1) as wear_name
+        from debuff_skin s
+        left join debuff_weapon_type wt on s.weapon_type_id = wt.id
+        left join debuff_skin_quality sq on s.quality_id = sq.id
+    </sql>
+
+    <!-- 查询饰品列表（管理端）：支持按名称/武器类型/品质/状态筛选，可按是否有在售记录过滤 -->
+    <select id="selectSkinList" parameterType="Skin" resultMap="SkinResult">
+        <include refid="selectSkinVo"/>
+        <where>
+            <!-- 条件筛选：按饰品名称模糊匹配 -->
+            <if test="skinName != null and skinName != ''">
+                and s.skin_name like concat('%', #{skinName}, '%')
+            </if>
+            <!-- 条件筛选：按武器类型ID精确匹配 -->
+            <if test="weaponTypeId != null">
+                and s.weapon_type_id = #{weaponTypeId}
+            </if>
+            <!-- 条件筛选：按品质ID精确匹配 -->
+            <if test="qualityId != null">
+                and s.quality_id = #{qualityId}
+            </if>
+            <!-- 条件筛选：按状态精确匹配 -->
+            <if test="status != null and status != ''">
+                and s.status = #{status}
+            </if>
+            <!-- 条件筛选：只查有在售记录的饰品（EXISTS子查询检查是否有status=0的上架记录） -->
+            <if test="inMarket != null and inMarket">
+                and exists (select 1 from debuff_skin_listing sl where sl.skin_id = s.id and sl.status = 0)
+            </if>
+        </where>
+        order by s.id asc
+    </select>
+
+    <!-- 根据ID查询饰品详情 -->
+    <select id="selectSkinById" parameterType="Long" resultMap="SkinResult">
+        <include refid="selectSkinVo"/>
+        where s.id = #{skinId}
+    </select>
+
+    <!-- 【核心】C端市场列表：聚合查询每种饰品的最低价格/在售数量，支持多维度筛选和排序 -->
+    <!-- LEFT JOIN上架表时限定status=0（在售），确保只统计有效上架 -->
+    <select id="selectMarketList" parameterType="SkinMarketQuery" resultMap="SkinMarketVOResult">
+        select
+            s.id as skin_id,
+            s.skin_name,
+            s.image_url,
+            s.min_price,
+            wt.weapon_name,
+            wt.weapon_category,
+            sq.quality_name,
+            sq.quality_color,
+            min(sl.price) as lowest_price,
+            count(sl.id) as listing_count,
+            (select wear_name from debuff_inventory i where i.skin_id = s.id and i.status in (0, 1) limit 1) as wear_name,
+            (select sl2.id from debuff_skin_listing sl2 where sl2.skin_id = s.id and sl2.status = 0 order by sl2.price asc limit 1) as first_listing_id
+        from debuff_skin s
+        left join debuff_weapon_type wt on s.weapon_type_id = wt.id
+        left join debuff_skin_quality sq on s.quality_id = sq.id
+        left join debuff_skin_listing sl on s.id = sl.skin_id and sl.status = 0
+        <where>
+            <!-- 只查已上架的饰品（status='0'表示正常状态） -->
+            s.status = '0'
+            <!-- 条件筛选：按武器大类过滤（如步枪/手枪/匕首等分类） -->
+            <if test="weaponCategoryId != null and weaponCategoryId != ''">
+                and wt.weapon_category = #{weaponCategoryId}
+            </if>
+            <!-- 条件筛选：按具体武器类型ID过滤 -->
+            <if test="weaponTypeId != null">
+                and s.weapon_type_id = #{weaponTypeId}
+            </if>
+            <!-- 条件筛选：按品质ID过滤 -->
+            <if test="qualityId != null">
+                and s.quality_id = #{qualityId}
+            </if>
+            <!-- 条件筛选：最低价格过滤（价格区间下限） -->
+            <if test="minPrice != null">
+                and sl.price &gt;= #{minPrice}
+            </if>
+            <!-- 条件筛选：最高价格过滤（价格区间上限） -->
+            <if test="maxPrice != null">
+                and sl.price &lt;= #{maxPrice}
+            </if>
+            <!-- 条件筛选：按饰品名称关键词模糊匹配 -->
+            <if test="keyword != null and keyword != ''">
+                and s.skin_name like concat('%', #{keyword}, '%')
+            </if>
+        </where>
+        group by s.id, s.skin_name, s.image_url, s.min_price, s.create_time,
+                 wt.weapon_name, wt.weapon_category, sq.quality_name, sq.quality_color
+        <!-- 只展示有在售上架记录的饰品 -->
+        having count(sl.id) > 0
+        <!-- 动态排序：支持按价格升降/最新/热度（在售数量）排序 -->
+        <choose>
+            <when test="orderBy == 'price_asc'">order by lowest_price asc</when>
+            <when test="orderBy == 'price_desc'">order by lowest_price desc</when>
+            <when test="orderBy == 'newest'">order by s.create_time desc</when>
+            <otherwise>order by listing_count desc</otherwise>
+        </choose>
+    </select>
+
+    <!-- 热门饰品：查询在售数量最多的饰品，按在售数量降序+最低价升序排列，限制返回条数 -->
+    <select id="selectHotSkins" parameterType="int" resultMap="SkinMarketVOResult">
+        select
+            s.id as skin_id,
+            s.skin_name,
+            s.image_url,
+            s.min_price,
+            wt.weapon_name,
+            wt.weapon_category,
+            sq.quality_name,
+            sq.quality_color,
+            min(sl.price) as lowest_price,
+            count(sl.id) as listing_count,
+            (select sl2.id from debuff_skin_listing sl2 where sl2.skin_id = s.id and sl2.status = 0 order by sl2.price asc limit 1) as first_listing_id
+        from debuff_skin s
+        left join debuff_weapon_type wt on s.weapon_type_id = wt.id
+        left join debuff_skin_quality sq on s.quality_id = sq.id
+        left join debuff_skin_listing sl on s.id = sl.skin_id and sl.status = 0
+        where s.status = '0'
+        group by s.id, s.skin_name, s.image_url, s.min_price, s.create_time,
+                 wt.weapon_name, wt.weapon_category, sq.quality_name, sq.quality_color
+        having count(sl.id) > 0
+        order by listing_count desc, lowest_price asc
+        limit #{limit}
+    </select>
+
+    <!-- 查询饰品详情页的卖家报价列表：按价格升序+上架时间升序排列，最低价卖家排在前面 -->
+    <select id="selectListingsBySkinId" parameterType="Long" resultMap="ListingItemResult">
+        select sl.id, sl.inventory_id, sl.seller_id, u.nick_name as seller_name,
+               sl.price, sl.listing_time
+        from debuff_skin_listing sl
+        left join sys_user u on sl.seller_id = u.user_id
+        where sl.skin_id = #{skinId} and sl.status = 0
+        order by sl.price asc, sl.listing_time asc
+    </select>
+
+    <!-- 查询饰品价格走势（最近30天）：从价格历史表获取每日的均价/最低价/最高价/成交量 -->
+    <select id="selectPriceHistoryBySkinId" parameterType="Long" resultMap="PricePointResult">
+        select date_format(record_date, '%Y-%m-%d') as record_date,
+               avg_price, min_price, max_price, volume
+        from debuff_price_history
+        where skin_id = #{skinId}
+          and record_date &gt;= date_sub(curdate(), interval 30 day)
+        order by record_date asc
+    </select>
+
+    <!-- 新增饰品：插入名称/武器类型/品质/图片/描述/最低价/状态，自增主键回填 -->
+    <insert id="insertSkin" parameterType="Skin" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_skin (skin_name, weapon_type_id, quality_id, image_url, description, min_price, status)
+        values (#{skinName}, #{weaponTypeId}, #{qualityId}, #{imageUrl}, #{description}, #{minPrice}, #{status})
+    </insert>
+
+    <!-- 修改饰品信息：动态SET，只更新非空字段，始终更新update_time -->
+    <update id="updateSkin" parameterType="Skin">
+        update debuff_skin
+        <set>
+            <if test="skinName != null and skinName != ''">skin_name = #{skinName},</if>
+            <if test="weaponTypeId != null">weapon_type_id = #{weaponTypeId},</if>
+            <if test="qualityId != null">quality_id = #{qualityId},</if>
+            <if test="imageUrl != null">image_url = #{imageUrl},</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="minPrice != null">min_price = #{minPrice},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            update_time = sysdate()
+        </set>
+        where id = #{id}
+    </update>
+
+    <!-- 更新饰品状态（上架/下架/禁用） -->
+    <update id="updateSkinStatus" parameterType="Skin">
+        update debuff_skin
+        set status = #{status}, update_time = sysdate()
+        where id = #{id}
+    </update>
+
+    <!-- 更新饰品最低价格：当上架/下架/改价时重新计算该饰品的市场最低价 -->
+    <update id="updateMinPrice" parameterType="Skin">
+        update debuff_skin
+        set min_price = #{minPrice}, update_time = sysdate()
+        where id = #{id}
+    </update>
+
+    <!-- 根据ID删除单个饰品 -->
+    <delete id="deleteSkinById" parameterType="Long">
+        delete from debuff_skin where id = #{id}
+    </delete>
+
+    <!-- 批量删除饰品：通过foreach遍历ID数组，生成IN子句 -->
+    <delete id="deleteSkinByIds" parameterType="Long">
+        delete from debuff_skin where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <!-- 查询饰品引用计数：删除前检查该饰品是否被库存/求购单/上架记录引用，防止误删有关联数据的饰品 -->
+    <select id="selectSkinRefCounts" parameterType="Long" resultType="java.util.HashMap">
+        select
+            (select count(*) from debuff_inventory where skin_id = #{skinId}) as inventory_count,
+            (select count(*) from debuff_buy_order where skin_id = #{skinId} and status in (0, 1)) as buy_order_count,
+            (select count(*) from debuff_skin_listing where skin_id = #{skinId} and status in (0, 1)) as listing_count,
+            0 as order_count
+    </select>
+</mapper>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.SkinQualityMapper -->
+<!-- 功能：饰品品质（SkinQuality）的增删改查，如崭新出厂、略有磨损等 -->
+<mapper namespace="com.debuff.trade.mapper.SkinQualityMapper">
+
+    <!-- 结果映射：将 debuff_skin_quality 表的数据库列名映射到 SkinQuality 实体属性 -->
+    <resultMap type="SkinQuality" id="SkinQualityResult">
+        <id     property="id"           column="id"            />
+        <result property="qualityName"  column="quality_name"  />
+        <result property="qualityColor" column="quality_color" />
+        <result property="sortOrder"    column="sort_order"    />
+    </resultMap>
+
+    <!-- SQL片段：饰品品质基础查询语句，可被其他SQL通过include复用，避免重复写列名 -->
+    <sql id="selectSkinQualityVo">
+        select id, quality_name, quality_color, sort_order
+        from debuff_skin_quality
+    </sql>
+
+    <!-- 查询饰品品质列表：支持按品质名称模糊搜索，按排序值和ID升序排列 -->
+    <select id="selectSkinQualityList" parameterType="SkinQuality" resultMap="SkinQualityResult">
+        <include refid="selectSkinQualityVo"/>
+        <where>
+            <!-- 条件筛选：按品质名称模糊匹配 -->
+            <if test="qualityName != null and qualityName != ''">
+                and quality_name like concat('%', #{qualityName}, '%')
+            </if>
+        </where>
+        order by sort_order, id
+    </select>
+
+    <!-- 查询所有饰品品质：无筛选条件，用于下拉框等场景，按排序值和ID升序排列 -->
+    <select id="selectAllSkinQualities" resultMap="SkinQualityResult">
+        <include refid="selectSkinQualityVo"/>
+        order by sort_order, id
+    </select>
+
+    <!-- 根据ID查询单个饰品品质详情 -->
+    <select id="selectSkinQualityById" parameterType="Long" resultMap="SkinQualityResult">
+        <include refid="selectSkinQualityVo"/>
+        where id = #{id}
+    </select>
+
+    <!-- 新增饰品品质：插入后自动回填自增主键到 SkinQuality.id -->
+    <insert id="insertSkinQuality" parameterType="SkinQuality" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_skin_quality (quality_name, quality_color, sort_order)
+        values (#{qualityName}, #{qualityColor}, #{sortOrder})
+    </insert>
+
+    <!-- 更新饰品品质：动态更新非空字段，根据ID定位要更新的记录 -->
+    <update id="updateSkinQuality" parameterType="SkinQuality">
+        update debuff_skin_quality
+        <set>
+            <if test="qualityName != null and qualityName != ''">quality_name = #{qualityName},</if>
+            <if test="qualityColor != null and qualityColor != ''">quality_color = #{qualityColor},</if>
+            <if test="sortOrder != null">sort_order = #{sortOrder},</if>
+        </set>
+        where id = #{id}
+    </update>
+
+    <!-- 根据ID删除单个饰品品质 -->
+    <delete id="deleteSkinQualityById" parameterType="Long">
+        delete from debuff_skin_quality where id = #{id}
+    </delete>
+
+    <!-- 批量删除饰品品质：根据ID数组批量删除，使用foreach生成IN子句 -->
+    <delete id="deleteSkinQualityByIds" parameterType="Long">
+        delete from debuff_skin_quality where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+</mapper>

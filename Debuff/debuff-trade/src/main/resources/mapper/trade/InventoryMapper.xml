@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.InventoryMapper -->
+<!-- 功能：库存（Inventory）管理，记录用户持有的饰品实例，包含磨损值、贴纸、来源等信息，支持上架/下架状态流转 -->
+<mapper namespace="com.debuff.trade.mapper.InventoryMapper">
+
+    <!-- 结果映射（VO）：库存表多表JOIN后的完整视图，包含饰品名称/图片/武器类型/品质等关联信息，用于页面展示 -->
+    <resultMap type="InventoryVO" id="InventoryVOResult">
+        <id     property="id"            column="id"             />
+        <result property="userId"        column="user_id"        />
+        <result property="skinId"        column="skin_id"        />
+        <result property="skinName"      column="skin_name"      />
+        <result property="imageUrl"      column="image_url"      />
+        <result property="weaponTypeId"  column="weapon_type_id" />
+        <result property="weaponName"    column="weapon_name"    />
+        <result property="weaponCategory" column="weapon_category" />
+        <result property="qualityId"     column="quality_id"     />
+        <result property="qualityName"   column="quality_name"   />
+        <result property="qualityColor"  column="quality_color"  />
+        <result property="floatValue"    column="float_value"    />
+        <result property="wearName"      column="wear_name"      />
+        <result property="stickerInfo"   column="sticker_info"   />
+        <result property="inspectLink"   column="inspect_link"   />
+        <result property="source"        column="source"         />
+        <result property="status"        column="status"         />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+
+    <!-- 结果映射（实体）：库存表基础映射，仅包含debuff_inventory表自身字段，用于业务逻辑处理 -->
+    <resultMap type="Inventory" id="InventoryResult">
+        <id     property="id"           column="id"            />
+        <result property="userId"       column="user_id"       />
+        <result property="skinId"       column="skin_id"       />
+        <result property="floatValue"   column="float_value"   />
+        <result property="wearName"     column="wear_name"     />
+        <result property="stickerInfo"  column="sticker_info"  />
+        <result property="inspectLink"  column="inspect_link"  />
+        <result property="source"       column="source"        />
+        <result property="status"       column="status"        />
+        <result property="createTime"   column="create_time"   />
+        <result property="updateTime"   column="update_time"   />
+    </resultMap>
+
+    <!-- SQL片段：库存基础查询语句，三表LEFT JOIN获取饰品名称/图片/武器类型/品质信息 -->
+    <sql id="selectInventoryVo">
+        select i.id, i.user_id, i.skin_id, i.float_value, i.wear_name, i.sticker_info,
+               i.inspect_link, i.source, i.status, i.create_time, i.update_time,
+               s.skin_name, s.image_url, s.weapon_type_id, s.quality_id,
+               wt.weapon_name, wt.weapon_category, sq.quality_name, sq.quality_color
+        from debuff_inventory i
+        left join debuff_skin s on i.skin_id = s.id
+        left join debuff_weapon_type wt on s.weapon_type_id = wt.id
+        left join debuff_skin_quality sq on s.quality_id = sq.id
+    </sql>
+
+    <!-- 查询用户库存列表（C端）：按当前用户筛选，支持按武器类型/品质/状态/饰品名称关键词过滤 -->
+    <select id="selectInventoryList" resultMap="InventoryVOResult">
+        <include refid="selectInventoryVo"/>
+        <where>
+            <!-- 必须条件：只查当前用户的库存 -->
+            i.user_id = #{userId}
+            <!-- 条件筛选：按武器类型ID过滤 -->
+            <if test="weaponTypeId != null">
+                and s.weapon_type_id = #{weaponTypeId}
+            </if>
+            <!-- 条件筛选：按品质ID过滤 -->
+            <if test="qualityId != null">
+                and s.quality_id = #{qualityId}
+            </if>
+            <!-- 条件筛选：按库存状态过滤（0=在库, 1=已上架） -->
+            <if test="status != null">
+                and i.status = #{status}
+            </if>
+            <!-- 条件筛选：按饰品名称关键词模糊匹配 -->
+            <if test="keyword != null and keyword != ''">
+                and s.skin_name like concat('%', #{keyword}, '%')
+            </if>
+        </where>
+        order by i.create_time desc
+    </select>
+
+    <!-- 根据ID查询库存详情（VO），包含关联的饰品/武器/品质信息 -->
+    <select id="selectInventoryById" parameterType="Long" resultMap="InventoryVOResult">
+        <include refid="selectInventoryVo"/>
+        where i.id = #{id}
+    </select>
+
+    <!-- 根据ID查询库存实体（纯Inventory表字段），用于业务逻辑中获取磨损值等内部数据 -->
+    <select id="selectInventoryEntityById" parameterType="Long" resultMap="InventoryResult">
+        select id, user_id, skin_id, float_value, wear_name, sticker_info,
+               inspect_link, source, status, create_time, update_time
+        from debuff_inventory
+        where id = #{id}
+    </select>
+
+    <!-- 新增库存记录：用户购买饰品后，将饰品写入库存，记录磨损值/贴纸/来源等信息 -->
+    <insert id="insertInventory" parameterType="Inventory" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_inventory (user_id, skin_id, float_value, wear_name, sticker_info, inspect_link, source, status)
+        values (#{userId}, #{skinId}, #{floatValue}, #{wearName}, #{stickerInfo}, #{inspectLink}, #{source}, #{status})
+    </insert>
+
+    <!-- 修改库存信息：更新磨损值/贴纸/查看链接等，始终更新update_time -->
+    <update id="updateInventory" parameterType="Inventory">
+        update debuff_inventory
+        <set>
+            <if test="floatValue != null">
+                float_value = #{floatValue},
+                wear_name = #{wearName},
+            </if>
+            <if test="stickerInfo != null">
+                sticker_info = #{stickerInfo},
+            </if>
+            <if test="inspectLink != null">
+                inspect_link = #{inspectLink},
+            </if>
+            update_time = sysdate()
+        </set>
+        where id = #{id}
+    </update>
+
+    <!-- 【核心】库存状态流转：通过条件更新实现乐观锁，只有当前状态匹配fromStatus时才更新为toStatus -->
+    <!-- 用于上架(status 0→1)和下架(status 1→0)操作，防止并发操作导致状态错乱 -->
+    <update id="updateStatus">
+        update debuff_inventory
+        set status = #{toStatus}, update_time = sysdate()
+        where id = #{inventoryId} and status = #{fromStatus}
+    </update>
+
+    <!-- 查询用户指定饰品的在库记录（status=0表示在库中未上架），取最早的一条，用于购买后入库 -->
+    <select id="selectInStockBySkinIdAndUser" resultMap="InventoryResult">
+        select id, user_id, skin_id, float_value, wear_name, sticker_info,
+               inspect_link, source, status, create_time, update_time
+        from debuff_inventory
+        where skin_id = #{skinId} and user_id = #{userId} and status = 0
+        order by id asc
+        limit 1
+    </select>
+
+    <!-- 根据饰品ID批量更新状态：用于下架时将该饰品的所有在库记录状态变更 -->
+    <update id="updateStatusBySkinId">
+        update debuff_inventory
+        set status = #{toStatus}, update_time = sysdate()
+        where skin_id = #{skinId} and status = #{fromStatus}
+    </update>
+
+    <!-- 根据饰品ID批量更新磨损值：根据float_value自动计算磨损等级名称（崭新出厂/略有磨损等） -->
+    <!-- 使用CASE WHEN根据磨损值区间判断磨损等级，子查询嵌套是为了兼容MySQL的UPDATE语法限制 -->
+    <update id="batchUpdateWearBySkinId">
+        update debuff_inventory
+        set float_value = #{floatValue},
+            wear_name = (select wear_name from (select CASE 
+                WHEN #{floatValue} &lt;= 0.07 THEN '崭新出厂'
+                WHEN #{floatValue} &lt;= 0.15 THEN '略有磨损'
+                WHEN #{floatValue} &lt;= 0.38 THEN '久经沙场'
+                WHEN #{floatValue} &lt;= 0.45 THEN '破损不堪'
+                ELSE '战痕累累'
+            END as wear_name) t),
+            update_time = sysdate()
+        where skin_id = #{skinId}
+    </update>
+
+    <!-- 根据库存ID删除库存记录 -->
+    <delete id="deleteInventoryById" parameterType="Long">
+        delete from debuff_inventory where id = #{inventoryId}
+    </delete>
+
+    <!-- 根据饰品ID删除库存记录（清理该饰品的所有库存） -->
+    <delete id="deleteBySkinId" parameterType="Long">
+        delete from debuff_inventory where skin_id = #{skinId}
+    </delete>
+
+    <!-- 管理端库存列表：支持按用户ID/饰品ID/状态/名称关键词筛选，管理员查看所有用户的库存 -->
+    <select id="selectAdminInventoryList" resultMap="InventoryVOResult">
+        <include refid="selectInventoryVo"/>
+        <where>
+            <if test="userId != null">
+                i.user_id = #{userId}
+            </if>
+            <if test="skinId != null">
+                and i.skin_id = #{skinId}
+            </if>
+            <if test="status != null">
+                and i.status = #{status}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                and s.skin_name like concat('%', #{keyword}, '%')
+            </if>
+        </where>
+        order by i.create_time desc
+    </select>
+</mapper>

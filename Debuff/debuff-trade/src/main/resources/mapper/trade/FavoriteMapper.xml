@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.FavoriteMapper -->
+<!-- 功能：用户收藏（Favorite）的增删改查，用户可收藏市场中的上架饰品，支持查看收藏列表及关联的饰品详情 -->
+<mapper namespace="com.debuff.trade.mapper.FavoriteMapper">
+    
+    <!-- 结果映射（基础）：将 debuff_favorite 表的列映射到 Favorite 实体属性 -->
+    <resultMap type="Favorite" id="FavoriteResult">
+        <result property="id"    column="id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="listingId"    column="listing_id"    />
+        <result property="createTime"    column="create_time"    />
+    </resultMap>
+
+    <!-- 结果映射（VO）：收藏列表展示视图，多表JOIN后包含饰品名称/图片/武器/品质/价格/上架状态等信息 -->
+    <resultMap type="com.debuff.trade.domain.vo.FavoriteVO" id="FavoriteVOResult">
+        <id     property="id"           column="fav_id"         />
+        <result property="listingId"    column="listing_id"     />
+        <result property="skinId"       column="skin_id"        />
+        <result property="skinName"     column="skin_name"      />
+        <result property="imageUrl"     column="image_url"      />
+        <result property="weaponName"   column="weapon_name"    />
+        <result property="qualityName"  column="quality_name"   />
+        <result property="qualityColor" column="quality_color"  />
+        <result property="price"        column="price"          />
+        <result property="listingStatus" column="listing_status" />
+        <result property="createTime"   column="create_time"    />
+    </resultMap>
+
+    <!-- SQL片段：收藏基础查询语句，可被其他SQL通过include复用 -->
+    <sql id="selectFavoriteVo">
+        select id, user_id, listing_id, create_time from debuff_favorite
+    </sql>
+
+    <!-- 查询收藏列表：支持按用户ID和上架记录ID筛选 -->
+    <select id="selectFavoriteList" parameterType="Favorite" resultMap="FavoriteResult">
+        <include refid="selectFavoriteVo"/>
+        <where>  
+            <!-- 条件筛选：按用户ID精确匹配 -->
+            <if test="userId != null "> and user_id = #{userId}</if>
+            <!-- 条件筛选：按上架记录ID精确匹配 -->
+            <if test="listingId != null "> and listing_id = #{listingId}</if>
+        </where>
+    </select>
+    
+    <!-- 根据ID查询单条收藏记录 -->
+    <select id="selectFavoriteById" parameterType="Long" resultMap="FavoriteResult">
+        <include refid="selectFavoriteVo"/>
+        where id = #{id}
+    </select>
+        
+    <!-- 新增收藏：用户点击收藏按钮时插入记录，动态插入非空字段 -->
+    <insert id="insertFavorite" parameterType="Favorite" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_favorite
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="userId != null">user_id,</if>
+            <if test="listingId != null">listing_id,</if>
+            <if test="createTime != null">create_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="userId != null">#{userId},</if>
+            <if test="listingId != null">#{listingId},</if>
+            <if test="createTime != null">#{createTime},</if>
+         </trim>
+    </insert>
+
+    <!-- 修改收藏记录：动态SET，只更新非空字段 -->
+    <update id="updateFavorite" parameterType="Favorite">
+        update debuff_favorite
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="listingId != null">listing_id = #{listingId},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <!-- 根据ID取消收藏 -->
+    <delete id="deleteFavoriteById" parameterType="Long">
+        delete from debuff_favorite where id = #{id}
+    </delete>
+
+    <!-- 批量取消收藏：通过foreach遍历ID数组，生成IN子句 -->
+    <delete id="deleteFavoriteByIds" parameterType="String">
+        delete from debuff_favorite where id in 
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <!-- 查询用户收藏列表（C端）：四表LEFT JOIN获取饰品名称/图片/武器类型/品质/价格等完整信息 -->
+    <!-- 按收藏时间倒序排列，最近收藏的排在前面 -->
+    <select id="selectUserFavoriteList" parameterType="Long" resultMap="FavoriteVOResult">
+        select f.id as fav_id, f.listing_id, f.create_time,
+               sl.skin_id, sl.price, sl.status as listing_status,
+               s.skin_name, s.image_url,
+               wt.weapon_name, sq.quality_name, sq.quality_color
+        from debuff_favorite f
+        left join debuff_skin_listing sl on f.listing_id = sl.id
+        left join debuff_skin s on sl.skin_id = s.id
+        left join debuff_weapon_type wt on s.weapon_type_id = wt.id
+        left join debuff_skin_quality sq on s.quality_id = sq.id
+        where f.user_id = #{userId}
+        order by f.create_time desc
+    </select>
+</mapper>

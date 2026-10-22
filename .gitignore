@@ -1,0 +1,8 @@
+﻿node_modules/
+target/
+dist/
+.idea/
+logs/
+uploadPath/
+*.log
+.DS_Store

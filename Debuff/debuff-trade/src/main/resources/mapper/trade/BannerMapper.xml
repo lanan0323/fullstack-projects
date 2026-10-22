@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.BannerMapper -->
+<!-- 功能：轮播图（Banner）的增删改查，管理端维护首页轮播图，C端展示正常状态的轮播图 -->
+<mapper namespace="com.debuff.trade.mapper.BannerMapper">
+
+    <!-- 结果映射：将 debuff_banner 表的数据库列名映射到 Banner 实体属性 -->
+    <resultMap type="Banner" id="BannerResult">
+        <id property="id" column="id" />
+        <result property="title" column="title" />
+        <result property="subtitle" column="subtitle" />
+        <result property="imageUrl" column="image_url" />
+        <result property="linkUrl" column="link_url" />
+        <result property="sortOrder" column="sort_order" />
+        <result property="status" column="status" />
+        <result property="createBy" column="create_by" />
+        <result property="createTime" column="create_time" />
+        <result property="updateBy" column="update_by" />
+        <result property="updateTime" column="update_time" />
+        <result property="remark" column="remark" />
+    </resultMap>
+
+    <!-- SQL片段：轮播图基础查询语句，可被其他SQL通过include复用 -->
+    <sql id="selectBannerVo">
+        select id, title, subtitle, image_url, link_url, sort_order, status,
+               create_by, create_time, update_by, update_time, remark
+        from debuff_banner
+    </sql>
+
+    <!-- 根据ID查询单个轮播图详情 -->
+    <select id="selectBannerById" parameterType="Long" resultMap="BannerResult">
+        <include refid="selectBannerVo" />
+        where id = #{id}
+    </select>
+
+    <!-- 查询轮播图列表（管理端）：支持按标题模糊搜索、按状态筛选，按排序值升序+ID倒序排列 -->
+    <select id="selectBannerList" parameterType="Banner" resultMap="BannerResult">
+        <include refid="selectBannerVo" />
+        <where>
+            <!-- 条件筛选：按标题模糊匹配 -->
+            <if test="title != null and title != ''">and title like concat('%', #{title}, '%')</if>
+            <!-- 条件筛选：按状态精确匹配（0=正常, 1=停用） -->
+            <if test="status != null and status != ''">and status = #{status}</if>
+        </where>
+        order by sort_order asc, id desc
+    </select>
+
+    <!-- 查询公开轮播图（C端首页）：只查状态为正常的轮播图，按排序值升序排列 -->
+    <select id="selectPublicBanners" resultMap="BannerResult">
+        <include refid="selectBannerVo" />
+        where status = '0'
+        order by sort_order asc, id desc
+    </select>
+
+    <!-- 新增轮播图：插入标题/副标题/图片/链接/排序/状态等信息，自增主键回填 -->
+    <insert id="insertBanner" parameterType="Banner" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_banner (title, subtitle, image_url, link_url, sort_order, status, create_by, create_time, remark)
+        values (#{title}, #{subtitle}, #{imageUrl}, #{linkUrl}, #{sortOrder}, #{status}, #{createBy}, #{createTime}, #{remark})
+    </insert>
+
+    <!-- 修改轮播图：动态SET，只更新非空字段，始终更新操作人和更新时间 -->
+    <update id="updateBanner" parameterType="Banner">
+        update debuff_banner
+        <set>
+            <if test="title != null">title = #{title},</if>
+            <if test="subtitle != null">subtitle = #{subtitle},</if>
+            <if test="imageUrl != null">image_url = #{imageUrl},</if>
+            <if test="linkUrl != null">link_url = #{linkUrl},</if>
+            <if test="sortOrder != null">sort_order = #{sortOrder},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            update_by = #{updateBy},
+            update_time = #{updateTime}
+        </set>
+        where id = #{id}
+    </update>
+
+    <!-- 根据ID删除单个轮播图 -->
+    <delete id="deleteBannerById" parameterType="Long">
+        delete from debuff_banner where id = #{id}
+    </delete>
+
+    <!-- 批量删除轮播图：通过foreach遍历ID数组，生成IN子句 -->
+    <delete id="deleteBannerByIds" parameterType="Long">
+        delete from debuff_banner where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.BuyOrderMapper -->
+<!-- 功能：求购单（BuyOrder）管理，用户发布求购意向（想以某个价格购买某饰品），支持改价/取消/卖方接受等操作 -->
+<mapper namespace="com.debuff.trade.mapper.BuyOrderMapper">
+
+    <!-- 结果映射（VO）：求购单多表JOIN后的展示视图，包含饰品名称/图片/武器/品质/买家昵称等关联信息 -->
+    <resultMap type="BuyOrderVO" id="BuyOrderVOResult">
+        <id     property="id"            column="id"             />
+        <result property="userId"        column="user_id"        />
+        <result property="buyerName"     column="buyer_name"     />
+        <result property="skinId"        column="skin_id"        />
+        <result property="skinName"      column="skin_name"      />
+        <result property="imageUrl"      column="image_url"      />
+        <result property="weaponName"    column="weapon_name"    />
+        <result property="qualityName"   column="quality_name"   />
+        <result property="qualityColor"  column="quality_color"  />
+        <result property="price"         column="price"          />
+        <result property="status"        column="status"         />
+        <result property="createTime"    column="create_time"    />
+    </resultMap>
+
+    <!-- 结果映射（实体）：求购单基础映射，仅包含debuff_buy_order表自身字段 -->
+    <resultMap type="BuyOrder" id="BuyOrderResult">
+        <id     property="id"           column="id"            />
+        <result property="userId"       column="user_id"       />
+        <result property="skinId"       column="skin_id"       />
+        <result property="price"        column="price"         />
+        <result property="status"       column="status"        />
+        <result property="createTime"   column="create_time"   />
+        <result property="updateTime"   column="update_time"   />
+    </resultMap>
+
+    <!-- SQL片段：求购单基础查询语句，四表LEFT JOIN获取饰品/武器/品质/买家信息 -->
+    <sql id="selectBuyOrderVo">
+        select b.id, b.user_id, b.skin_id, b.price, b.status, b.create_time,
+               s.skin_name, s.image_url,
+               wt.weapon_name, sq.quality_name, sq.quality_color, u.nick_name as buyer_name
+        from debuff_buy_order b
+        left join debuff_skin s on b.skin_id = s.id
+        left join debuff_weapon_type wt on s.weapon_type_id = wt.id
+        left join debuff_skin_quality sq on s.quality_id = sq.id
+        left join sys_user u on b.user_id = u.user_id
+    </sql>
+
+    <!-- 查询某饰品的求购列表（C端饰品详情页）：只查状态为0（进行中）的求购，按价格降序+时间升序排列 -->
+    <!-- 价格高的求购排在前面，吸引卖方接受；可选limit限制显示条数 -->
+    <select id="selectBySkin" resultMap="BuyOrderVOResult">
+        <include refid="selectBuyOrderVo"/>
+        where b.skin_id = #{skinId} and b.status = 0
+        order by b.price desc, b.create_time asc
+        <if test="limit != null and limit > 0">
+            limit #{limit}
+        </if>
+    </select>
+
+    <!-- 查询我的求购列表（C端）：只查当前用户状态为0（进行中）的求购，按创建时间倒序 -->
+    <select id="selectMyBuyOrders" parameterType="Long" resultMap="BuyOrderVOResult">
+        <include refid="selectBuyOrderVo"/>
+        where b.user_id = #{userId} and b.status = 0
+        order by b.create_time desc
+    </select>
+
+    <!-- 根据ID查询求购单实体（纯表字段），用于业务逻辑处理 -->
+    <select id="selectBuyOrderById" parameterType="Long" resultMap="BuyOrderResult">
+        select id, user_id, skin_id, price, status, create_time, update_time
+        from debuff_buy_order
+        where id = #{id}
+    </select>
+
+    <!-- 新增求购单：用户发布求购意向，记录用户ID/饰品ID/出价/状态 -->
+    <insert id="insertBuyOrder" parameterType="BuyOrder" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_buy_order (user_id, skin_id, price, status)
+        values (#{userId}, #{skinId}, #{price}, #{status})
+    </insert>
+
+    <!-- 修改求购价格：用户加价/降价，只允许修改状态为0（进行中）的求购 -->
+    <update id="updatePrice">
+        update debuff_buy_order
+        set price = #{price}, update_time = sysdate()
+        where id = #{id} and status = 0
+    </update>
+
+    <!-- 取消求购：买家主动取消，将状态改为2（已取消），需校验当前用户是求购发起者且状态为进行中 -->
+    <update id="cancelBuyOrder">
+        update debuff_buy_order
+        set status = 2, update_time = sysdate()
+        where id = #{id} and user_id = #{userId} and status = 0
+    </update>
+
+    <!-- 接受求购：卖方接受买家的求购报价，将状态改为1（已成交），需校验状态为进行中 -->
+    <update id="acceptBuyOrder">
+        update debuff_buy_order
+        set status = 1, update_time = sysdate()
+        where id = #{id} and status = 0
+    </update>
+</mapper>

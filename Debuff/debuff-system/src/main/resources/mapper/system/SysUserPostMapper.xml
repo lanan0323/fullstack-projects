@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.system.mapper.SysUserPostMapper -->
+<!-- 功能：用户与岗位关联关系管理，维护 sys_user_post 中间表，支持用户-岗位绑定的增删查操作 -->
+<mapper namespace="com.debuff.system.mapper.SysUserPostMapper">
+
+	<!-- 结果映射：将 sys_user_post 表的 user_id 和 post_id 映射到 SysUserPost 实体 -->
+	<resultMap type="SysUserPost" id="SysUserPostResult">
+		<result property="userId"     column="user_id"      />
+		<result property="postId"     column="post_id"      />
+	</resultMap>
+
+	<!-- 根据用户ID删除用户-岗位关联：删除指定用户的所有岗位绑定关系，通常在修改用户岗位时先清除再重建 -->
+	<delete id="deleteUserPostByUserId" parameterType="Long">
+		delete from sys_user_post where user_id=#{userId}
+	</delete>
+	
+	<!-- 根据岗位ID统计关联用户数量：检查该岗位下是否有用户，用于删除岗位前的校验 -->
+	<select id="countUserPostById" resultType="Integer">
+	    select count(1) from sys_user_post where post_id=#{postId}  
+	</select>
+	
+	<!-- 批量删除用户-岗位关联：按用户ID数组批量删除，删除多个用户时一次性清除所有关联 -->
+	<delete id="deleteUserPost" parameterType="Long">
+ 		delete from sys_user_post where user_id in
+ 		<foreach collection="array" item="userId" open="(" separator="," close=")">
+ 			#{userId}
+        </foreach> 
+ 	</delete>
+	
+	<!-- 批量新增用户-岗位关联：为用户分配多个岗位，使用 foreach 拼接多行 VALUES 实现批量插入 -->
+	<insert id="batchUserPost">
+		insert into sys_user_post(user_id, post_id) values
+		<foreach item="item" index="index" collection="list" separator=",">
+			(#{item.userId},#{item.postId})
+		</foreach>
+	</insert>
+	
+</mapper>

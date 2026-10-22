@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.debuff.trade.mapper.AdminStatsMapper">
+
+    <!--
+        总览统计（Dashboard 顶部数字卡片）
+        使用7个子查询一次性返回所有统计指标，减少网络往返：
+        - user_count: 注册用户总数（sys_user 表行数）
+        - skin_count: 饰品总数（debuff_skin 表行数）
+        - market_count: 在售商品数（上架表中 status=0 的不同饰品数，用 DISTINCT 去重）
+        - order_count: 订单总数
+        - order_amount: 成交总金额（只统计 status=1 已完成的订单，未完成的不算真实收入）
+        - today_order_count: 今日订单数（date(create_time)=curdate() 匹配当天）
+        - wallet_balance: 钱包总余额（所有用户余额之和，COALESCE 防止 SUM 返回 NULL）
+        返回类型 HashMap，前端通过 key 名取值
+        
+        【答辩要点】为什么用7个子查询而不是7张表 JOIN？
+        ① 这些统计指标之间没有关联条件（用户表和订单表没有直接 JOIN 关系），
+        用 JOIN 反而需要笛卡尔积再分组，SQL 更复杂且性能更差；
+        ② 子查询各自独立，MySQL 优化器可以并行执行，每个子查询只扫描需要的行；
+        ③ 返回一行七列，前端一次取值，比发7个请求或 UNION 更简洁高效。
+        
+        【答辩要点】COALESCE 是什么？为什么不直接 SUM？
+        COALESCE(expr, 0) 返回第一个非 NULL 的值。当表为空时，SUM() 返回 NULL 而不是 0，
+        前端拿到 null 会导致图表渲染异常。COALESCE(SUM(price), 0) 保证即使没有数据也返回 0。
+        这是 SQL 中处理空集聚合的标准做法。
+    -->
+    <!-- 总览统计查询：一次性返回7个统计指标，用于Dashboard顶部数字卡片展示 -->
+    <select id="selectOverview" resultType="java.util.HashMap">
+        <!-- SELECT子句：包含7个子查询，每个子查询返回一个统计指标 -->
+        select
+            <!-- 子查询1：统计注册用户总数，从sys_user表查询，别名为user_count -->
+            (select count(*) from sys_user) as user_count,
+            <!-- 子查询2：统计饰品总数，从debuff_skin表查询，别名为skin_count -->
+            (select count(*) from debuff_skin) as skin_count,
+            <!-- 子查询3：统计在售商品数，从上架表中查询status=0的不同饰品数，DISTINCT去重，别名为market_count -->
+            (select count(distinct sl.skin_id) from debuff_skin_listing sl where sl.status = 0) as market_count,
+            <!-- 子查询4：统计订单总数，从debuff_order表查询，别名为order_count -->
+            (select count(*) from debuff_order) as order_count,
+            <!-- 子查询5：统计成交总金额，只统计status=1已完成的订单，COALESCE防止SUM返回NULL，别名为order_amount -->
+            (select coalesce(sum(price), 0) from debuff_order where status = 1) as order_amount,
+            <!-- 子查询6：统计今日订单数，筛选status=1且创建日期为今天的订单，别名为today_order_count -->
+            (select count(*) from debuff_order where status = 1 and date(create_time) = curdate()) as today_order_count,
+            <!-- 子查询7：统计钱包总余额，从用户钱包表查询所有余额之和，COALESCE防止SUM返回NULL，别名为wallet_balance -->
+            (select coalesce(sum(balance), 0) from debuff_user_wallet) as wallet_balance
+    </select>
+
+    <!--
+        近 N 天订单趋势（Dashboard 折线图）
+        按日期分组统计每天的订单数量和成交金额：
+        - date(create_time) 截取日期部分（去掉时分秒），作为分组依据
+        - count(*) 当天的订单总数（含所有状态）
+        - sum(case when status=1 then price else 0 end) 只累加已完成订单的金额
+          用 CASE WHEN 而不是 WHERE status=1，是因为 WHERE 会过滤掉未完成订单导致 count 不准
+        - WHERE create_time >= date_sub(curdate(), interval #{days}-1 day) 限定时间范围
+          例如 days=7 时，查从今天往前推6天共7天的数据（含今天）
+        返回 List<HashMap>，每个元素包含 {day, order_count, amount}
+        
+        【答辩要点】为什么金额统计用 CASE WHEN 而不是 WHERE status=1 过滤？
+        因为折线图需要同时展示"订单数量"和"成交金额"两条线。
+        订单数量要包含所有状态（待确认+已完成+已取消），表示当天的下单活跃度；
+        成交金额只算已完成的（status=1），因为待确认的还没真正成交。
+        如果用 WHERE status=1 过滤，count(*) 就只统计已完成的订单数量了，和实际需求不符。
+        CASE WHEN 在 SUM 内部做条件判断，不影响外层的 count(*)，两全其美。
+    -->
+    <!-- 订单趋势查询：按日期分组统计近N天的订单数量和成交金额，用于Dashboard折线图 -->
+    <select id="selectOrderTrend" resultType="java.util.HashMap">
+        <!-- SELECT子句：查询日期、订单数量、成交金额三个字段 -->
+        select
+            <!-- 字段1：截取创建时间的日期部分（去掉时分秒），别名为day，作为分组依据 -->
+            date(create_time) as day,
+            <!-- 字段2：统计当天的订单总数（含所有状态），别名为order_count -->
+            count(*) as order_count,
+            <!-- 字段3：统计当天已完成订单的成交金额，CASE WHEN条件累加，COALESCE防止NULL，别名为amount -->
+            coalesce(sum(case when status = 1 then price else 0 end), 0) as amount
+        <!-- 主表：debuff_order 订单表 -->
+        from debuff_order
+        <!-- WHERE条件：创建时间大于等于"当前日期减去days-1天"，限定查询近N天的数据 -->
+        where create_time &gt;= date_sub(curdate(), interval #{days} - 1 day)
+        <!-- GROUP BY子句：按日期分组，每天一条记录 -->
+        group by date(create_time)
+        <!-- ORDER BY子句：按日期正序排列，从早到晚 -->
+        order by day asc
+    </select>
+
+    <!--
+        成交金额 TOP N（Dashboard 柱状图）
+        统计哪些饰品的总成交金额最高：
+        - LEFT JOIN debuff_skin 获取饰品名称（skin_name），
+          用 LEFT JOIN 而非 INNER JOIN 是防止 skin 被删后订单数据丢失
+        - COALESCE(s.skin_name, '未知饰品') 处理 skin 为空的情况，显示"未知饰品"
+        - WHERE o.status=1 只统计已完成的订单（待确认/已取消的不算真实成交）
+        - GROUP BY o.skin_id, s.skin_name 按饰品分组聚合
+        - ORDER BY amount DESC 按成交金额降序
+        - LIMIT #{limit} 取前N名（默认5）
+        返回 List<HashMap>，每个元素包含 {skin_name, amount, order_count}
+    -->
+    <!-- TOP饰品查询：统计成交金额最高的前N个饰品，用于Dashboard柱状图展示 -->
+    <select id="selectTopSkins" resultType="java.util.HashMap">
+        <!-- SELECT子句：查询饰品名称、成交总金额、订单数量三个字段 -->
+        select
+            <!-- 字段1：饰品名称，COALESCE处理空值，如果饰品被删除则显示"未知饰品"，别名为skin_name -->
+            coalesce(s.skin_name, '未知饰品') as skin_name,
+            <!-- 字段2：成交总金额，SUM累加已完成订单的价格，别名为amount -->
+            sum(o.price) as amount,
+            <!-- 字段3：订单数量，COUNT统计已完成订单的条数，别名为order_count -->
+            count(*) as order_count
+        <!-- 主表：debuff_order 订单表，别名为 o -->
+        from debuff_order o
+        <!-- LEFT JOIN：左连接饰品表获取饰品名称，防止饰品被删后订单数据丢失 -->
+        left join debuff_skin s on o.skin_id = s.id
+        <!-- WHERE条件：只统计status=1已完成的订单，待确认/已取消的不算真实成交 -->
+        where o.status = 1
+        <!-- GROUP BY子句：按饰品ID和饰品名称分组聚合，每个饰品一条记录 -->
+        group by o.skin_id, s.skin_name
+        <!-- ORDER BY子句：按成交金额降序排列，金额最高的排在前面 -->
+        order by amount desc
+        <!-- LIMIT子句：限制返回记录数为前N名，N由参数limit指定 -->
+        limit #{limit}
+    </select>
+
+    <!--
+        订单状态分布（Dashboard 饼图）
+        按 status 分组统计各状态的订单数量：
+        status=0 待确认, status=1 已完成, status=2 已取消
+        返回 List<HashMap>，每个元素包含 {status, count}
+        前端根据 status 值映射为中文标签后绘制饼图
+    -->
+    <!-- 订单状态分布查询：按状态分组统计各状态的订单数量，用于Dashboard饼图展示 -->
+    <select id="selectStatusDist" resultType="java.util.HashMap">
+        <!-- SELECT子句：查询订单状态和对应的订单数量 -->
+        select
+            <!-- 字段1：订单状态值，0=待确认 1=已完成 2=已取消 -->
+            status,
+            <!-- 字段2：该状态的订单数量，COUNT统计条数，别名为count -->
+            count(*) as count
+        <!-- 主表：debuff_order 订单表 -->
+        from debuff_order
+        <!-- GROUP BY子句：按订单状态分组，每个状态一条记录 -->
+        group by status
+    </select>
+
+</mapper>

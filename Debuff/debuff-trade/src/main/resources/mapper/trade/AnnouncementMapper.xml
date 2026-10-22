@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.AnnouncementMapper -->
+<!-- 功能：公告（Announcement）的增删改查，包括管理端公告列表和C端公开公告展示 -->
+<mapper namespace="com.debuff.trade.mapper.AnnouncementMapper">
+    
+    <!-- 结果映射：将 debuff_announcement 表的数据库列名映射到 Announcement 实体属性 -->
+    <resultMap type="Announcement" id="AnnouncementResult">
+        <result property="id"    column="id"    />
+        <result property="title"    column="title"    />
+        <result property="content"    column="content"    />
+        <result property="announcementType"    column="announcement_type"    />
+        <result property="status"    column="status"    />
+        <result property="createBy"    column="create_by"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateTime"    column="update_time"    />
+        <result property="remark"    column="remark"    />
+    </resultMap>
+
+    <!-- SQL片段：公告基础查询语句，可被其他SQL通过include复用 -->
+    <sql id="selectAnnouncementVo">
+        select id, title, content, announcement_type, status, create_by, create_time, update_time, remark from debuff_announcement
+    </sql>
+
+    <!-- 查询公告列表：支持按标题模糊搜索、按公告类型和状态精确筛选，管理端使用 -->
+    <select id="selectAnnouncementList" parameterType="Announcement" resultMap="AnnouncementResult">
+        <include refid="selectAnnouncementVo"/>
+        <where>  
+            <!-- 条件筛选：按公告标题模糊匹配 -->
+            <if test="title != null  and title != ''"> and title like concat('%', #{title}, '%')</if>
+            <!-- 条件筛选：按公告类型精确匹配 -->
+            <if test="announcementType != null  and announcementType != ''"> and announcement_type = #{announcementType}</if>
+            <!-- 条件筛选：按状态精确匹配（0=正常, 1=停用） -->
+            <if test="status != null  and status != ''"> and status = #{status}</if>
+        </where>
+        order by id asc
+    </select>
+    
+    <!-- 根据ID查询单个公告详情 -->
+    <select id="selectAnnouncementById" parameterType="Long" resultMap="AnnouncementResult">
+        <include refid="selectAnnouncementVo"/>
+        where id = #{id}
+    </select>
+
+    <!-- 查询公开公告（C端首页）：只查状态为正常的公告，按ID倒序取最新5条 -->
+    <select id="selectPublicAnnouncements" resultMap="AnnouncementResult">
+        <include refid="selectAnnouncementVo"/>
+        where status = '0'
+        order by id desc
+        limit 5
+    </select>
+        
+    <!-- 新增公告：动态插入非空字段，使用trim处理多余的逗号，自增主键回填 -->
+    <insert id="insertAnnouncement" parameterType="Announcement" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_announcement
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="title != null and title != ''">title,</if>
+            <if test="content != null">content,</if>
+            <if test="announcementType != null">announcement_type,</if>
+            <if test="status != null">status,</if>
+            <if test="createBy != null">create_by,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+            <if test="remark != null">remark,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="title != null and title != ''">#{title},</if>
+            <if test="content != null">#{content},</if>
+            <if test="announcementType != null">#{announcementType},</if>
+            <if test="status != null">#{status},</if>
+            <if test="createBy != null">#{createBy},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+            <if test="remark != null">#{remark},</if>
+         </trim>
+    </insert>
+
+    <!-- 修改公告：动态SET，只更新非空字段，使用trim处理多余逗号 -->
+    <update id="updateAnnouncement" parameterType="Announcement">
+        update debuff_announcement
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="title != null and title != ''">title = #{title},</if>
+            <if test="content != null">content = #{content},</if>
+            <if test="announcementType != null">announcement_type = #{announcementType},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="createBy != null">create_by = #{createBy},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+            <if test="remark != null">remark = #{remark},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <!-- 根据ID删除单个公告 -->
+    <delete id="deleteAnnouncementById" parameterType="Long">
+        delete from debuff_announcement where id = #{id}
+    </delete>
+
+    <!-- 批量删除公告：通过foreach遍历ID数组，生成IN子句 -->
+    <delete id="deleteAnnouncementByIds" parameterType="String">
+        delete from debuff_announcement where id in 
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+</mapper>

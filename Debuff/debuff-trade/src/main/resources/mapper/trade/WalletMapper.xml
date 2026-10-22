@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.trade.mapper.WalletMapper -->
+<!-- 功能：用户钱包（Wallet）的增删改查 + 6个核心资金操作（冻结支付/解冻/买方结算/卖方收入/充值/提现） -->
+<mapper namespace="com.debuff.trade.mapper.WalletMapper">
+    
+    <!-- 结果映射：将钱包表+用户表的列映射到 Wallet 实体属性，包含关联的用户名/昵称 -->
+    <resultMap type="Wallet" id="WalletResult">
+        <result property="id"    column="id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="balance"    column="balance"    />
+        <result property="frozenAmount"    column="frozen_amount"    />
+        <result property="totalRecharge"    column="total_recharge"    />
+        <result property="totalWithdraw"    column="total_withdraw"    />
+        <result property="totalIncome"    column="total_income"    />
+        <result property="totalExpense"    column="total_expense"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateTime"    column="update_time"    />
+        <!-- 关联字段：通过LEFT JOIN sys_user获取的用户名 -->
+        <result property="userName"      column="user_name"      />
+        <!-- 关联字段：通过LEFT JOIN sys_user获取的用户昵称 -->
+        <result property="nickName"      column="nick_name"      />
+    </resultMap>
+
+    <!-- SQL片段：钱包基础查询语句，LEFT JOIN sys_user获取用户名和昵称，便于管理端按用户名搜索 -->
+    <sql id="selectWalletVo">
+        select w.id, w.user_id, w.balance, w.frozen_amount, w.total_recharge, w.total_withdraw, w.total_income, w.total_expense, w.create_time, w.update_time,
+               u.user_name, u.nick_name
+        from debuff_user_wallet w
+        left join sys_user u on u.user_id = w.user_id
+    </sql>
+
+    <!-- 查询钱包列表（管理端）：支持按用户ID/用户名/余额/冻结金额等多条件筛选 -->
+    <select id="selectWalletList" parameterType="Wallet" resultMap="WalletResult">
+        <include refid="selectWalletVo"/>
+        <where>  
+            <!-- 条件筛选：按用户ID精确匹配 -->
+            <if test="userId != null "> and w.user_id = #{userId}</if>
+            <!-- 条件筛选：按用户名模糊匹配（同时匹配登录名和昵称） -->
+            <if test="userName != null and userName != ''"> and (u.user_name like concat('%',#{userName},'%') or u.nick_name like concat('%',#{userName},'%'))</if>
+            <!-- 条件筛选：按余额精确匹配 -->
+            <if test="balance != null "> and w.balance = #{balance}</if>
+            <!-- 条件筛选：按冻结金额精确匹配 -->
+            <if test="frozenAmount != null "> and w.frozen_amount = #{frozenAmount}</if>
+            <!-- 条件筛选：按累计充值精确匹配 -->
+            <if test="totalRecharge != null "> and w.total_recharge = #{totalRecharge}</if>
+            <!-- 条件筛选：按累计提现精确匹配 -->
+            <if test="totalWithdraw != null "> and w.total_withdraw = #{totalWithdraw}</if>
+            <!-- 条件筛选：按累计收入精确匹配 -->
+            <if test="totalIncome != null "> and w.total_income = #{totalIncome}</if>
+            <!-- 条件筛选：按累计支出精确匹配 -->
+            <if test="totalExpense != null "> and w.total_expense = #{totalExpense}</if>
+        </where>
+    </select>
+    
+    <!-- 根据ID查询单个钱包详情 -->
+    <select id="selectWalletById" parameterType="Long" resultMap="WalletResult">
+        <include refid="selectWalletVo"/>
+        where id = #{id}
+    </select>
+        
+    <!-- 新增钱包：动态插入非空字段，用户注册时创建钱包记录 -->
+    <insert id="insertWallet" parameterType="Wallet" useGeneratedKeys="true" keyProperty="id">
+        insert into debuff_user_wallet
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="userId != null">user_id,</if>
+            <if test="balance != null">balance,</if>
+            <if test="frozenAmount != null">frozen_amount,</if>
+            <if test="totalRecharge != null">total_recharge,</if>
+            <if test="totalWithdraw != null">total_withdraw,</if>
+            <if test="totalIncome != null">total_income,</if>
+            <if test="totalExpense != null">total_expense,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="userId != null">#{userId},</if>
+            <if test="balance != null">#{balance},</if>
+            <if test="frozenAmount != null">#{frozenAmount},</if>
+            <if test="totalRecharge != null">#{totalRecharge},</if>
+            <if test="totalWithdraw != null">#{totalWithdraw},</if>
+            <if test="totalIncome != null">#{totalIncome},</if>
+            <if test="totalExpense != null">#{totalExpense},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+         </trim>
+    </insert>
+
+    <!-- 修改钱包：动态SET，只更新非空字段 -->
+    <update id="updateWallet" parameterType="Wallet">
+        update debuff_user_wallet
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="balance != null">balance = #{balance},</if>
+            <if test="frozenAmount != null">frozen_amount = #{frozenAmount},</if>
+            <if test="totalRecharge != null">total_recharge = #{totalRecharge},</if>
+            <if test="totalWithdraw != null">total_withdraw = #{totalWithdraw},</if>
+            <if test="totalIncome != null">total_income = #{totalIncome},</if>
+            <if test="totalExpense != null">total_expense = #{totalExpense},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <!-- 根据ID删除单个钱包 -->
+    <delete id="deleteWalletById" parameterType="Long">
+        delete from debuff_user_wallet where id = #{id}
+    </delete>
+
+    <!-- 批量删除钱包：通过foreach遍历ID数组，生成IN子句 -->
+    <delete id="deleteWalletByIds" parameterType="String">
+        delete from debuff_user_wallet where id in 
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <!-- 根据用户ID查询钱包（一个用户对应一个钱包） -->
+    <select id="selectWalletByUserId" parameterType="Long" resultMap="WalletResult">
+        <include refid="selectWalletVo"/>
+        where w.user_id = #{userId}
+    </select>
+
+    <!-- 【核心】冻结支付：买方下单时，从可用余额扣除并转入冻结金额，同时累加累计支出 -->
+    <!-- 安全校验：WHERE条件确保余额充足才执行，防止透支（乐观锁思想） -->
+    <update id="freezePay">
+        update debuff_user_wallet
+        set balance = balance - #{amount},
+            frozen_amount = frozen_amount + #{amount},
+            total_expense = total_expense + #{amount},
+            update_time = sysdate()
+        where user_id = #{userId} and balance &gt;= #{amount}
+    </update>
+
+    <!-- 【核心】解冻：订单取消时，将冻结金额退回可用余额 -->
+    <!-- 安全校验：WHERE条件确保冻结金额充足才执行 -->
+    <update id="unfreeze">
+        update debuff_user_wallet
+        set balance = balance + #{amount},
+            frozen_amount = frozen_amount - #{amount},
+            update_time = sysdate()
+        where user_id = #{userId} and frozen_amount &gt;= #{amount}
+    </update>
+
+    <!-- 【核心】买方结算：交易完成后，扣减买方的冻结金额（货已到手，冻结释放） -->
+    <!-- 安全校验：WHERE条件确保冻结金额充足才执行 -->
+    <update id="settleBuyer">
+        update debuff_user_wallet
+        set frozen_amount = frozen_amount - #{amount},
+            update_time = sysdate()
+        where user_id = #{userId} and frozen_amount &gt;= #{amount}
+    </update>
+
+    <!-- 【核心】卖方收入：交易完成后，将货款打入卖方可用余额，同时累加累计收入 -->
+    <update id="settleIncome">
+        update debuff_user_wallet
+        set balance = balance + #{amount},
+            total_income = total_income + #{amount},
+            update_time = sysdate()
+        where user_id = #{userId}
+    </update>
+
+    <!-- 【核心】充值：用户充值后增加可用余额，同时累加累计充值 -->
+    <update id="recharge">
+        update debuff_user_wallet
+        set balance = balance + #{amount},
+            total_recharge = total_recharge + #{amount},
+            update_time = sysdate()
+        where user_id = #{userId}
+    </update>
+
+    <!-- 【核心】提现：用户提现时扣减可用余额，同时累加累计提现 -->
+    <!-- 安全校验：WHERE条件确保余额充足才执行，防止透支 -->
+    <update id="withdraw">
+        update debuff_user_wallet
+        set balance = balance - #{amount},
+            total_withdraw = total_withdraw + #{amount},
+            update_time = sysdate()
+        where user_id = #{userId} and balance &gt;= #{amount}
+    </update>
+</mapper>

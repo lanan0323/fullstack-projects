@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: milktea-gateway
+  cloud:
+    nacos:
+      server-addr: 192.168.120.238:8848
+      config:
+        file-extension: yml
+        shared-configs:
+            - dataId: shared-log.yml

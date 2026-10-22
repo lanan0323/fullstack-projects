@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.system.mapper.SysLogininforMapper -->
+<!-- 功能：系统登录日志管理，记录用户登录行为（IP、浏览器、操作系统、登录状态等），支持按条件查询和批量删除 -->
+<mapper namespace="com.debuff.system.mapper.SysLogininforMapper">
+
+	<!-- 结果映射：将 sys_logininfor 表的数据库列名映射到 SysLogininfor 实体属性 -->
+	<resultMap type="SysLogininfor" id="SysLogininforResult">
+		<id     property="infoId"        column="info_id"           />
+		<result property="userName"      column="user_name"         />
+		<result property="status"        column="status"            />
+		<result property="ipaddr"        column="ipaddr"            />
+		<result property="loginLocation" column="login_location"    />
+		<result property="browser"       column="browser"           />
+		<result property="os"            column="os"                />
+		<result property="msg"           column="msg"               />
+		<result property="loginTime"     column="login_time"        />
+	</resultMap>
+
+	<!-- 新增登录日志：插入一条登录记录，login_time 使用 sysdate() 自动取当前时间 -->
+	<insert id="insertLogininfor" parameterType="SysLogininfor">
+		insert into sys_logininfor (user_name, status, ipaddr, login_location, browser, os, msg, login_time)
+		values (#{userName}, #{status}, #{ipaddr}, #{loginLocation}, #{browser}, #{os}, #{msg}, sysdate())
+	</insert>
+	
+	<!-- 查询登录日志列表：支持按IP地址模糊匹配、状态精确匹配、用户名模糊匹配、时间范围筛选，按ID倒序排列 -->
+	<select id="selectLogininforList" parameterType="SysLogininfor" resultMap="SysLogininforResult">
+		select info_id, user_name, ipaddr, login_location, browser, os, status, msg, login_time from sys_logininfor
+		<where>
+			<!-- 条件筛选：按IP地址模糊匹配 -->
+			<if test="ipaddr != null and ipaddr != ''">
+				AND ipaddr like concat('%', #{ipaddr}, '%')
+			</if>
+			<!-- 条件筛选：按登录状态精确匹配（0成功/1失败） -->
+			<if test="status != null and status != ''">
+				AND status = #{status}
+			</if>
+			<!-- 条件筛选：按用户名模糊匹配 -->
+			<if test="userName != null and userName != ''">
+				AND user_name like concat('%', #{userName}, '%')
+			</if>
+			<if test="params.beginTime != null and params.beginTime != ''"><!-- 开始时间检索 -->
+				AND login_time &gt;= #{params.beginTime}
+			</if>
+			<if test="params.endTime != null and params.endTime != ''"><!-- 结束时间检索 -->
+				AND login_time &lt;= #{params.endTime}
+			</if>
+		</where>
+		order by info_id desc
+	</select>
+	
+	<!-- 批量删除登录日志：按ID数组批量物理删除 -->
+	<delete id="deleteLogininforByIds" parameterType="Long">
+ 		delete from sys_logininfor where info_id in
+ 		<foreach collection="array" item="infoId" open="(" separator="," close=")">
+ 			#{infoId}
+        </foreach> 
+ 	</delete>
+    
+    <!-- 清空登录日志：使用 TRUNCATE 整表清空，不可恢复 -->
+    <update id="cleanLogininfor">
+        truncate table sys_logininfor
+    </update>
+    
+</mapper> 

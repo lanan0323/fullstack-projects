@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.debuff.trade.mapper.ListingMapper">
+
+    <!--
+        上架记录结果映射：debuff_skin_listing 表列 → Listing 实体属性
+        状态值含义：0=在售, 1=已售, 2=已下架
+    -->
+    <!-- 结果映射：将上架记录表的数据库列名映射到 Java 实体属性 -->
+    <resultMap type="Listing" id="ListingResult">
+        <!-- 主键映射：上架记录表的 id 列 → 实体的 id 属性 -->
+        <id     property="id"           column="id"           />
+        <!-- 库存ID映射：inventory_id 列 → inventoryId 属性，关联 debuff_inventory 表 -->
+        <result property="inventoryId"  column="inventory_id" />
+        <!-- 卖家ID映射：seller_id 列 → sellerId 属性，关联 sys_user 表 -->
+        <result property="sellerId"     column="seller_id"    />
+        <!-- 饰品ID映射：skin_id 列 → skinId 属性，关联 debuff_skin 表 -->
+        <result property="skinId"       column="skin_id"      />
+        <!-- 价格映射：price 列 → price 属性，上架价格，单位：元 -->
+        <result property="price"        column="price"        />
+        <!-- 状态映射：status 列 → status 属性，0=在售 1=已售 2=已下架 -->
+        <result property="status"       column="status"       />
+        <!-- 上架时间映射：listing_time 列 → listingTime 属性，商品上架时间 -->
+        <result property="listingTime"  column="listing_time" />
+        <!-- 售出时间映射：sold_time 列 → soldTime 属性，商品成交时间 -->
+        <result property="soldTime"     column="sold_time"    />
+        <!-- 过期时间映射：expire_time 列 → expireTime 属性，上架记录过期时间 -->
+        <result property="expireTime"   column="expire_time"  />
+    </resultMap>
+
+    <!--
+        共享 SQL 片段：上架记录基础查询
+        使用 <include refid="selectListingVo"/> 复用，避免重复写列名
+    -->
+    <!-- SQL片段：定义上架记录基础查询语句，可被其他SQL通过include复用 -->
+    <sql id="selectListingVo">
+        <!-- 查询上架记录表的所有字段：id、库存ID、卖家ID、饰品ID、价格、状态、时间字段 -->
+        select id, inventory_id, seller_id, skin_id, price, status, listing_time, sold_time, expire_time from debuff_skin_listing
+    </sql>
+
+    <!-- 根据ID查询单条上架记录（下单时校验商品是否存在且在售） -->
+    <!-- 查询单个上架记录：根据ID查询，用于下单时校验商品是否存在且在售 -->
+    <select id="selectListingById" parameterType="Long" resultMap="ListingResult">
+        <!-- 引用共享SQL片段，包含上架记录表的基础SELECT语句 -->
+        <include refid="selectListingVo"/>
+        <!-- WHERE条件：按上架记录ID精确匹配 -->
+        where id = #{id}
+    </select>
+
+    <!--
+        条件更新上架状态（通用方法）
+        用于两个场景：
+        1. 下架：updateStatus(id, 0, 2) — 在售→已下架
+        2. 取消订单恢复：updateStatus(listingId, 1, 0) — 已售→在售
+        WHERE status=#{fromStatus} 保证只有状态匹配时才更新，防止并发冲突
+    -->
+    <!-- 条件更新上架状态：通用方法，用于下架或取消订单恢复，通过状态条件防止并发冲突 -->
+    <update id="updateStatus">
+        <!-- 更新目标表：debuff_skin_listing 上架记录表 -->
+        update debuff_skin_listing
+        <!-- SET子句：设置新状态，并清空售出时间（下架或恢复时清除原售出时间） -->
+        set status = #{toStatus}, sold_time = null
+        <!-- WHERE条件：按ID和原状态双重匹配，确保只有状态正确时才更新 -->
+        where id = #{id} and status = #{fromStatus}
+    </update>
+
+    <!--
+        标记上架记录为已售（下单时调用）
+        SQL: UPDATE debuff_skin_listing SET status=1, sold_time=sysdate() WHERE id=? AND status=0
+        条件 WHERE status=0 确保只有在售的商品才能被购买，已售/已下架的返回0行触发回滚
+        这是并发安全的关键：两人同时买同一商品，只有第一个能 markSold 成功
+        
+        【答辩要点】markSold 的并发安全原理？
+        MySQL InnoDB 在执行 UPDATE 时会对匹配的行加排他锁（X锁），
+        当两个事务同时执行 markSold 时：
+        ① 两个事务都执行到 UPDATE，MySQL 对同一行加行锁，一个先拿到锁，另一个等待；
+        ② 先拿到锁的事务执行 WHERE status=0 检查通过，status 改为1，提交事务，释放锁；
+        ③ 第二个事务拿到锁后执行 WHERE status=0，此时 status 已经是1，不匹配，返回0行；
+        ④ Service 层判断返回0行，抛异常触发回滚。
+        整个过程不需要显式加锁（SELECT FOR UPDATE），一条 UPDATE 就解决了并发问题。
+    -->
+    <!-- 标记商品已售：下单时调用，将上架状态改为已售并记录售出时间，通过WHERE status=0保证并发安全 -->
+    <update id="markSold">
+        <!-- 更新目标表：debuff_skin_listing 上架记录表 -->
+        update debuff_skin_listing
+        <!-- SET子句：状态改为1（已售），售出时间设为当前系统时间 -->
+        set status = 1, sold_time = sysdate()
+        <!-- WHERE条件：按ID匹配且状态必须为0（在售），防止已售/已下架商品被重复购买 -->
+        where id = #{id} and status = 0
+    </update>
+
+    <!--
+        新增上架记录（上架时调用）
+        useGeneratedKeys="true" 插入后自动回填自增主键到 listing.id
+        状态默认为0（在售），上架时间为当前系统时间 sysdate()
+    -->
+    <!-- 新增上架记录：上架时调用，插入后自动回填自增主键，状态默认为在售，上架时间为当前时间 -->
+    <insert id="insertListing" parameterType="Listing" useGeneratedKeys="true" keyProperty="id">
+        <!-- 插入目标表：debuff_skin_listing 上架记录表 -->
+        insert into debuff_skin_listing
+        <!-- 插入的列：库存ID、卖家ID、饰品ID、价格、状态、上架时间 -->
+        (inventory_id, seller_id, skin_id, price, status, listing_time)
+        <!-- 插入的值：对应列的值，状态固定为0（在售），上架时间使用sysdate()获取当前时间 -->
+        values (#{inventoryId}, #{sellerId}, #{skinId}, #{price}, 0, sysdate())
+    </insert>
+
+    <!--
+        查询库存在售的上架记录（用于防重复上架校验）
+        WHERE inventory_id=#{inventoryId} AND status=0
+        如果返回非 null，说明该库存已经有一条在售的上架记录，不能重复上架
+        ListingServiceImpl.createListing() 中用此方法做前置校验
+    -->
+    <!-- 查询库存在售记录：根据库存ID查询在售的上架记录，用于防重复上架校验 -->
+    <select id="selectListingByInventoryId" parameterType="Long" resultMap="ListingResult">
+        <!-- 引用共享SQL片段，包含上架记录表的基础SELECT语句 -->
+        <include refid="selectListingVo"/>
+        <!-- WHERE条件：按库存ID精确匹配 -->
+        where inventory_id = #{inventoryId}
+        <!-- WHERE条件：状态必须为0（在售），只查询在售的上架记录 -->
+        and status = 0
+    </select>
+
+    <!--
+        根据饰品ID批量更新上架状态（管理端删除饰品时调用）
+        WHERE skin_id=#{skinId} AND status IN (0, 1) 匹配在售和已售的记录
+        将它们的 status 统一改为 toStatus（通常是已下架/已删除）
+        这样管理端删除饰品后，关联的上架记录也会被清理
+    -->
+    <!-- 批量更新上架状态：根据饰品ID更新关联的上架记录状态，管理端删除饰品时调用 -->
+    <update id="updateStatusBySkinId">
+        <!-- 更新目标表：debuff_skin_listing 上架记录表 -->
+        update debuff_skin_listing
+        <!-- SET子句：设置新状态，通常为已下架/已删除状态 -->
+        set status = #{toStatus}
+        <!-- WHERE条件：按饰品ID精确匹配 -->
+        where skin_id = #{skinId}
+        <!-- WHERE条件：状态在售(0)或已售(1)的记录，使用IN子句匹配多个状态值 -->
+        and status in (0, 1)
+    </update>
+
+    <!-- 根据饰品ID删除上架记录（管理端删除饰品时物理删除关联数据） -->
+    <!-- 删除上架记录：根据饰品ID删除关联的上架记录，管理端删除饰品时物理删除 -->
+    <delete id="deleteBySkinId" parameterType="Long">
+        <!-- 删除语句：从上架记录表中删除指定饰品ID的所有记录 -->
+        delete from debuff_skin_listing where skin_id = #{skinId}
+    </delete>
+</mapper>

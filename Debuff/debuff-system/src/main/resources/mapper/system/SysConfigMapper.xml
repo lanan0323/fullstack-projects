@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 对应 Mapper 接口：com.debuff.system.mapper.SysConfigMapper -->
+<!-- 功能：系统参数配置（SysConfig）的增删改查，如验证码开关、注册开关等系统级配置项 -->
+<mapper namespace="com.debuff.system.mapper.SysConfigMapper">
+    
+    <!-- 结果映射：将 sys_config 表的数据库列名映射到 SysConfig 实体属性 -->
+    <resultMap type="SysConfig" id="SysConfigResult">
+    	<id     property="configId"      column="config_id"      />
+        <result property="configName"    column="config_name"    />
+        <result property="configKey"     column="config_key"     />
+        <result property="configValue"   column="config_value"   />
+        <result property="configType"    column="config_type"    />
+        <result property="createBy"      column="create_by"      />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateBy"      column="update_by"      />
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+    
+    <!-- SQL片段：系统配置基础查询语句，可被其他SQL通过include复用 -->
+    <sql id="selectConfigVo">
+        select config_id, config_name, config_key, config_value, config_type, create_by, create_time, update_by, update_time, remark 
+		from sys_config
+    </sql>
+    
+    <!-- SQL片段：通用条件筛选，按配置ID或配置键名精确查询，可被多个select复用 -->
+	<sql id="sqlwhereSearch">
+		<where>
+			<if test="configId !=null">
+				and config_id = #{configId}
+			</if>
+			<if test="configKey !=null and configKey != ''">
+				and config_key = #{configKey}
+			</if>
+		</where>
+	</sql>
+    
+    <!-- 根据条件查询配置信息（复用sqlwhereSearch条件片段） -->
+	<select id="selectConfig" parameterType="SysConfig" resultMap="SysConfigResult">
+        <include refid="selectConfigVo"/>
+        <include refid="sqlwhereSearch"/>
+    </select>
+    
+    <!-- 查询系统配置列表：支持按配置名称/类型/键名模糊搜索，支持按创建时间范围筛选 -->
+    <select id="selectConfigList" parameterType="SysConfig" resultMap="SysConfigResult">
+        <include refid="selectConfigVo"/>
+        <where>
+			<!-- 条件筛选：按配置名称模糊匹配 -->
+			<if test="configName != null and configName != ''">
+				AND config_name like concat('%', #{configName}, '%')
+			</if>
+			<!-- 条件筛选：按配置类型精确匹配（Y=系统内置, N=非内置） -->
+			<if test="configType != null and configType != ''">
+				AND config_type = #{configType}
+			</if>
+			<!-- 条件筛选：按配置键名模糊匹配 -->
+			<if test="configKey != null and configKey != ''">
+				AND config_key like concat('%', #{configKey}, '%')
+			</if>
+			<!-- 条件筛选：按创建时间范围-开始时间 -->
+			<if test="params.beginTime != null and params.beginTime != ''">
+				and date_format(create_time,'%y%m%d') &gt;= date_format(#{params.beginTime},'%y%m%d')
+			</if>
+			<!-- 条件筛选：按创建时间范围-结束时间 -->
+			<if test="params.endTime != null and params.endTime != ''">
+				and date_format(create_time,'%y%m%d') &lt;= date_format(#{params.endTime},'%y%m%d')
+			</if>
+		</where>
+    </select>
+    
+    <!-- 根据ID查询单个系统配置 -->
+    <select id="selectConfigById" parameterType="Long" resultMap="SysConfigResult">
+        <include refid="selectConfigVo"/>
+        where config_id = #{configId}
+    </select>
+	
+    <!-- 校验配置键名是否唯一：查询指定键名的配置记录，取第一条判断是否存在 -->
+    <select id="checkConfigKeyUnique" parameterType="String" resultMap="SysConfigResult">
+        <include refid="selectConfigVo"/>
+        where config_key = #{configKey} limit 1
+    </select>
+    
+    <!-- 新增系统配置：动态插入非空字段，create_time使用sysdate()自动填充 -->
+    <insert id="insertConfig" parameterType="SysConfig">
+        insert into sys_config (
+			<if test="configName != null and configName != '' ">config_name,</if>
+			<if test="configKey != null and configKey != '' ">config_key,</if>
+			<if test="configValue != null and configValue != '' ">config_value,</if>
+			<if test="configType != null and configType != '' ">config_type,</if>
+			<if test="createBy != null and createBy != ''">create_by,</if>
+			<if test="remark != null and remark != ''">remark,</if>
+ 			create_time
+        )values(
+			<if test="configName != null and configName != ''">#{configName},</if>
+			<if test="configKey != null and configKey != ''">#{configKey},</if>
+			<if test="configValue != null and configValue != ''">#{configValue},</if>
+			<if test="configType != null and configType != ''">#{configType},</if>
+			<if test="createBy != null and createBy != ''">#{createBy},</if>
+			<if test="remark != null and remark != ''">#{remark},</if>
+ 			sysdate()
+		)
+    </insert>
+	 
+    <!-- 修改系统配置：动态SET，只更新非空字段，始终更新update_time -->
+    <update id="updateConfig" parameterType="SysConfig">
+        update sys_config 
+        <set>
+            <if test="configName != null and configName != ''">config_name = #{configName},</if>
+            <if test="configKey != null and configKey != ''">config_key = #{configKey},</if>
+            <if test="configValue != null and configValue != ''">config_value = #{configValue},</if>
+            <if test="configType != null and configType != ''">config_type = #{configType},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            <if test="remark != null">remark = #{remark},</if>
+ 			update_time = sysdate()
+        </set>
+        where config_id = #{configId}
+    </update>
+	
+    <!-- 根据ID删除单个系统配置 -->
+    <delete id="deleteConfigById" parameterType="Long">
+        delete from sys_config where config_id = #{configId}
+    </delete>
+    
+    <!-- 批量删除系统配置：通过foreach遍历ID数组，生成IN子句 -->
+    <delete id="deleteConfigByIds" parameterType="Long">
+        delete from sys_config where config_id in 
+        <foreach item="configId" collection="array" open="(" separator="," close=")">
+        	#{configId}
+        </foreach>
+    </delete>
+    
+</mapper>
